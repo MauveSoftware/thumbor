@@ -1,0 +1,4 @@
+envtpl==0.6.0
+circus
+circus-web
+pycurl
