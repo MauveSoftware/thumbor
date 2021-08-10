@@ -27,6 +27,11 @@ def _return_contents(response, url, context, req_start=None):
     return result
 
 def _update_max_age(context, cache_control):
+    match = re.search("s-maxage\\s*=\\s*(\\d+)", cache_control)
+    if match:
+        context.request.max_age = int(match[1])
+        return
+
     match = re.search("max-age\\s*=\\s*(\\d+)", cache_control)
     if match:
         context.request.max_age = int(match[1])
