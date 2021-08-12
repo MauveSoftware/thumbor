@@ -54,13 +54,18 @@ class Storage(BaseStorage):
         with open(temp_abspath, "wb") as _file:
             _file.write(image_bytes)
 
-        max_age = self.get_max_age()
-        if max_age is not None:
+        if self.context.request.max_age is not None:
             with open(temp_abspath + Storage.EXPIRE_EXT, "wb") as _file:
-                _file.write(str.encode(str(max_age)))
+                self.write_expire_file(_file)
             move(temp_abspath + Storage.EXPIRE_EXT, file_abspath + Storage.EXPIRE_EXT)
 
         move(temp_abspath, file_abspath)
+
+    def write_expire_file(self, _file):
+        _file.write(str.encode(str(self.context.request.max_age)))
+        
+        if self.context.request.max_age_shared is not None:
+            _file.write(str.encode("," + str(self.context.request.max_age_shared)))
 
     async def get(self):
         if self.context.request.bypass_cache:
@@ -98,7 +103,11 @@ class Storage(BaseStorage):
                 logger.debug("[RESULT_STORAGE] image not found at %s", file_abspath)
                 return None
 
-        expire_time = self.get_expire_time(file_abspath)
+        max_age, max_age_shared = self.get_expire_time(file_abspath)
+        expire_time = max_age
+        if max_age_shared is not None:
+            expire_time = max_age_shared
+
         if self.is_expired(file_abspath, expire_time):
             logger.debug("[RESULT_STORAGE] cached image has expired")
             return None
@@ -106,8 +115,9 @@ class Storage(BaseStorage):
         with open(file_abspath, "rb") as image_file:
             buffer = image_file.read()
 
-        if expire_time is not None:
-            self.context.request.max_age = expire_time
+        if max_age is not None:
+            self.context.request.max_age = max_age
+            self.context.request.max_age_shared = max_age_shared
 
         result = ResultStorageResult(
             buffer=buffer,
@@ -167,17 +177,15 @@ class Storage(BaseStorage):
         file_abspath = path + Storage.EXPIRE_EXT
 
         if not exists(file_abspath):
-            return self.context.config.get("RESULT_STORAGE_EXPIRATION_SECONDS", None)
+            return self.context.config.get("RESULT_STORAGE_EXPIRATION_SECONDS", None), None
 
         with open(file_abspath, "rb") as expire_file:
             buffer = expire_file.read()
-            return int(buffer.decode())
+            max_ages = buffer.decode().split(",")
+            if len(max_ages) == 2:
+                return int(max_ages[0]), int(max_ages[1])
 
-    def get_max_age(self):
-        if self.context.request.max_age_shared is not None:
-            return self.context.request.max_age_shared
-
-        return self.context.request.max_age
+            return int(max_ages[0]), None
 
     @deprecated("Use result's last_modified instead")
     def last_updated(self):

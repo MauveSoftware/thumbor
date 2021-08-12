@@ -41,16 +41,21 @@ class Storage(storages.BaseStorage):
         with open(temp_abspath, "wb") as _file:
             _file.write(file_bytes)
 
-        max_age = self.get_max_age()
-        if max_age is not None:
+        if self.context.request.max_age is not None:
             with open(temp_abspath + Storage.EXPIRE_EXT, "wb") as _file:
-                _file.write(str.encode(str(max_age)))
+                self.write_expire_file(_file)
             move(temp_abspath + Storage.EXPIRE_EXT, file_abspath + Storage.EXPIRE_EXT)
 
         logger.debug("moving tempfile %s to %s...", temp_abspath, file_abspath)
         move(temp_abspath, file_abspath)
 
         return path
+
+    def write_expire_file(self, _file):
+        _file.write(str.encode(str(self.context.request.max_age)))
+        
+        if self.context.request.max_age_shared is not None:
+            _file.write(str.encode("," + str(self.context.request.max_age_shared)))
 
     async def put_crypto(self, path):
         if not self.context.config.STORES_CRYPTO_KEY_FOR_EACH_IMAGE:
@@ -108,8 +113,10 @@ class Storage(storages.BaseStorage):
         if not resource_available:
             return None
 
-        expire_time = self.get_expire_time(path)
-        self.context.request.max_time = expire_time
+        max_age, max_age_shared = self.get_expire_time(abs_path)
+        if max_age is not None:
+            self.context.request.max_age = max_age
+            self.context.request.max_age_shared = max_age_shared
 
         with open(self.path_on_filesystem(path), "rb") as source_file:
             return source_file.read()
@@ -147,7 +154,11 @@ class Storage(storages.BaseStorage):
         if path_on_filesystem is None:
             path_on_filesystem = self.path_on_filesystem(path)
 
-        expire_time = self.get_expire_time(path_on_filesystem)
+        max_age, max_age_shared = self.get_expire_time(path_on_filesystem)
+        expire_time = max_age
+        if max_age_shared is not None:
+            expire_time = max_age_shared
+
         return os.path.exists(path_on_filesystem) and not self.__is_expired(path_on_filesystem, expire_time)
 
     async def remove(self, path):
@@ -170,14 +181,12 @@ class Storage(storages.BaseStorage):
         file_abspath = path + Storage.EXPIRE_EXT
 
         if not exists(file_abspath):
-            return self.context.config.get("STORAGE_EXPIRATION_SECONDS", None)
+            return self.context.config.get("STORAGE_EXPIRATION_SECONDS", None), None
 
         with open(file_abspath, "rb") as expire_file:
             buffer = expire_file.read()
-            return int(buffer.decode())
+            max_ages = buffer.decode().split(",")
+            if len(max_ages) == 2:
+                return int(max_ages[0]), int(max_ages[1])
 
-    def get_max_age(self):
-        if self.context.request.max_age_shared is not None:
-            return self.context.request.max_age_shared
-
-        return self.context.request.max_age
+            return int(max_ages[0]), None
