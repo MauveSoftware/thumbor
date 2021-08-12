@@ -163,6 +163,7 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         request=None,
         max_age=None,
         auto_png_to_jpg=None,
+        bypass_cache=False,
     ):
         self.debug = bool(debug)
         self.meta = bool(meta)
@@ -224,6 +225,7 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         self.max_bytes = None
         self.max_age = max_age
         self.auto_png_to_jpg = auto_png_to_jpg
+        self.bypass_cache = bypass_cache
 
         if request:
             self.url = request.path

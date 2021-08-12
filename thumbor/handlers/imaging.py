@@ -38,6 +38,7 @@ class ImagingHandler(ContextHandler):
 
         kwargs["request"] = self.request
         self.context.request = RequestParameters(**kwargs)
+        self._handle_cache_bypass_header()
 
         has_none = not self.context.request.unsafe and not self.context.request.hash
         has_both = self.context.request.unsafe and self.context.request.hash
@@ -92,6 +93,12 @@ class ImagingHandler(ContextHandler):
                 return
 
         return await self.execute_image_operations()
+
+    def _handle_cache_bypass_header(self):
+        headers = self.context.request_handler.request.headers
+        val = headers.pop("X-Thumbor-BypassCache", None)
+        if val is not None and str(val) == "1":
+            self.context.request.bypass_cache = True
 
     async def get(self, **kw):
         return await self.check_image(kw)

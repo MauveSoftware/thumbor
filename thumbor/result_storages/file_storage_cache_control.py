@@ -59,6 +59,10 @@ class Storage(BaseStorage):
         move(temp_abspath, file_abspath)
 
     async def get(self):
+        if self.context.request.bypass_cache:
+            logger.info("[RESULT_STORAGE] bypassing cache for %s", self.context.request.url)
+            return None
+
         path = self.context.request.url
         file_abspath = self.normalize_path(path)
 

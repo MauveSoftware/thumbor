@@ -94,6 +94,10 @@ class Storage(storages.BaseStorage):
         return file_abspath
 
     async def get(self, path):
+        if self.context.request.bypass_cache:
+            logger.info("[STORAGE] bypassing cache for %s", self.context.request.url)
+            return None
+
         abs_path = self.path_on_filesystem(path)
 
         resource_available = await self.exists(path, path_on_filesystem=abs_path)
