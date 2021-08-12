@@ -162,6 +162,7 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         accepts_webp=False,
         request=None,
         max_age=None,
+        max_age_shared=None,
         auto_png_to_jpg=None,
         bypass_cache=False,
     ):
@@ -224,6 +225,7 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         self.accepts_webp = accepts_webp
         self.max_bytes = None
         self.max_age = max_age
+        self.max_age_shared = max_age_shared
         self.auto_png_to_jpg = auto_png_to_jpg
         self.bypass_cache = bypass_cache
 

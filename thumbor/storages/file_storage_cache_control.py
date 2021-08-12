@@ -24,7 +24,10 @@ class Storage(storages.BaseStorage):
     EXPIRE_EXT = ".max_age"
 
     async def put(self, path, file_bytes):
-        if self.context.request.max_age is not None and self.context.request.max_age == 0:
+        if self.context.request.max_age_shared is not None and self.context.request.max_age_shared == 0:
+            return
+
+        if self.context.request.max_age_shared is None and self.context.request.max_age is not None and self.context.request.max_age == 0:
             return
 
         file_abspath = self.path_on_filesystem(path)
@@ -38,10 +41,11 @@ class Storage(storages.BaseStorage):
         with open(temp_abspath, "wb") as _file:
             _file.write(file_bytes)
 
-        if self.context.request.max_age is not None:
+        max_age = self.get_max_age()
+        if max_age is not None:
             with open(temp_abspath + Storage.EXPIRE_EXT, "wb") as _file:
-                _file.write(str.encode(str(self.context.request.max_age)))
-                move(temp_abspath + Storage.EXPIRE_EXT, file_abspath + Storage.EXPIRE_EXT)
+                _file.write(str.encode(str(max_age)))
+            move(temp_abspath + Storage.EXPIRE_EXT, file_abspath + Storage.EXPIRE_EXT)
 
         logger.debug("moving tempfile %s to %s...", temp_abspath, file_abspath)
         move(temp_abspath, file_abspath)
@@ -171,3 +175,9 @@ class Storage(storages.BaseStorage):
         with open(file_abspath, "rb") as expire_file:
             buffer = expire_file.read()
             return int(buffer.decode())
+
+    def get_max_age(self):
+        if self.context.request.max_age_shared is not None:
+            return self.context.request.max_age_shared
+
+        return self.context.request.max_age

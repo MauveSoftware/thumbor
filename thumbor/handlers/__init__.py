@@ -535,7 +535,14 @@ class BaseHandler(tornado.web.RequestHandler):
             max_age = self.context.config.MAX_AGE_TEMP_IMAGE
 
         if max_age:
-            self.set_header("Cache-Control", "max-age=" + str(max_age) + ",public")
+            cache_control = "max-age=" + str(max_age)
+            
+            if self.context.request.max_age_shared is not None:
+                cache_control += ",s-maxage=" + str(self.context.request.max_age_shared)
+            
+            cache_control += ",public"
+
+            self.set_header("Cache-Control", cache_control)
             self.set_header(
                 "Expires",
                 datetime.datetime.utcnow() + datetime.timedelta(seconds=max_age),
