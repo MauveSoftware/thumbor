@@ -99,6 +99,7 @@ class ImagingHandler(ContextHandler):
         val = headers.pop("X-Thumbor-BypassCache", None)
         if val is not None and str(val) == "1":
             self.context.request.bypass_cache = True
+            self.context.request.cache_status = "bypass"
 
     async def get(self, **kw):
         return await self.check_image(kw)

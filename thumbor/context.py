@@ -165,6 +165,7 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         max_age_shared=None,
         auto_png_to_jpg=None,
         bypass_cache=False,
+        cache_status="miss",
     ):
         self.debug = bool(debug)
         self.meta = bool(meta)
@@ -228,6 +229,7 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         self.max_age_shared = max_age_shared
         self.auto_png_to_jpg = auto_png_to_jpg
         self.bypass_cache = bypass_cache
+        self.cache_status = cache_status
 
         if request:
             self.url = request.path

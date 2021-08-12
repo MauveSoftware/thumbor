@@ -157,6 +157,7 @@ class BaseHandler(tornado.web.RequestHandler):
             if result is None:
                 self.context.metrics.incr("result_storage.miss")
             else:
+                self.context.request.cache_status = "hit"
                 self.context.metrics.incr("result_storage.hit")
                 self.context.metrics.incr("result_storage.bytes_read", len(result))
                 logger.debug("[RESULT_STORAGE] IMAGE FOUND: %s", req.url)
@@ -550,6 +551,7 @@ class BaseHandler(tornado.web.RequestHandler):
 
         self.set_header("Server", "Thumbor/%s" % __version__)
         self.set_header("Content-Type", content_type)
+        self.set_header("X-Thumbor-Cache-Status", str(self.context.request.cache_status))
 
         if isinstance(results, ResultStorageResult):
             buffer = results.buffer
@@ -700,6 +702,7 @@ class BaseHandler(tornado.web.RequestHandler):
                 fetch_result.successful = True
 
                 self.context.metrics.incr("storage.hit")
+                self.context.request.cache_status = "hit"
 
                 mime = BaseEngine.get_mimetype(fetch_result.buffer)
                 self.context.request.extension = EXTENSION.get(mime, ".jpg")
