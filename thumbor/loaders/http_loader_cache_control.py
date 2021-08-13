@@ -40,5 +40,12 @@ def _update_max_age(context, cache_control):
 
     context.request.max_age = 0
 
+def _normalize_url(url):
+    url = http_loader.quote_url(url)
+    if url.startswith("http:"):
+        url = url.replace("http:", "https:", 1)
+
+    return url if url.startswith("https://") else "https://%s" % url
+
 async def load(context, url):
-    return await http_loader.load(context, url, return_contents_fn=_return_contents,)
+    return await http_loader.load(context, url, return_contents_fn=_return_contents,normalize_url_func=_normalize_url)
