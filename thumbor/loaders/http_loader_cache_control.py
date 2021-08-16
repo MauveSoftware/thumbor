@@ -40,12 +40,25 @@ def _update_max_age(context, cache_control):
 
     context.request.max_age = 0
 
-def _normalize_url(url):
+def _normalize_url(url, context):
     url = http_loader.quote_url(url)
+
     if url.startswith("http:"):
         url = url.replace("http:", "https:", 1)
 
-    return url if url.startswith("https://") else "https://%s" % url
+    if not url.startswith("https://"):
+        url = "https://%s" % url
+
+    backend_address = context.request_handler.request.headers.pop("X-Thumbor-Backend-Address", None)
+    if backend_address is None:
+        return url
+
+    idx = url.index('/', 8)
+    if idx < 0:
+        return url
+
+    return "https://" + backend_address + url[idx:]
 
 async def load(context, url):
-    return await http_loader.load(context, url, return_contents_fn=_return_contents,normalize_url_func=_normalize_url)
+    normalize_url_func = lambda u: _normalize_url(u, context)
+    return await http_loader.load(context, url, return_contents_fn=_return_contents,normalize_url_func=normalize_url_func)
