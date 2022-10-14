@@ -124,6 +124,7 @@ http://<thumbor-server>/300x200/smart/thumbor.readthedocs.io/en/latest/_images/l
             "webcolors==1.*,>=1.10.0",
             "colorful==0.*,>=0.5.4",
             "numpy<1.22.0",
+            "Jinja2<3.1.0",
         ],
         extras_require={"tests": TESTS_REQUIREMENTS},
         entry_points={
