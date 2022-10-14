@@ -27,6 +27,10 @@ def _return_contents(response, url, context, req_start=None):
     return result
 
 def _update_max_age(context, cache_control):
+    cacheTTL = context.request_handler.request.headers.pop("X-Thumbor-Cache-TTL", None)
+    if cacheTTL is not None:
+        context.request.max_age_shared = int(cacheTTL)
+
     match = re.search("s-maxage\\s*=\\s*(\\d+)", cache_control)
     if match:
         context.request.max_age_shared = int(match[1])
