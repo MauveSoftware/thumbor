@@ -60,6 +60,9 @@ class Storage(storages.BaseStorage):
         if exists(path):
             return
 
+        dir = dirname(path)
+        self.ensure_dir(dir)
+
         with open(path, "wb") as _file:
             _file.write(data)
 
