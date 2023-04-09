@@ -12,9 +12,9 @@ import hashlib
 import os
 from datetime import datetime
 from json import dumps, loads
+from os import link, remove
 from os.path import dirname, exists, getmtime, splitext
 from shutil import move
-from uuid import uuid4
 
 import thumbor.storages as storages
 from thumbor.utils import logger
@@ -30,25 +30,24 @@ class Storage(storages.BaseStorage):
         if self.context.request.max_age_shared is None and self.context.request.max_age is not None and self.context.request.max_age == 0:
             return
 
-        file_abspath = self.path_on_filesystem(path)
-        temp_abspath = "%s.%s" % (file_abspath, str(uuid4()).replace("-", ""))
-        file_dir_abspath = dirname(file_abspath)
-
-        logger.debug("creating tempfile for %s in %s...", path, temp_abspath)
-
-        self.ensure_dir(file_dir_abspath)
-
-        with open(temp_abspath, "wb") as _file:
-            _file.write(file_bytes)
+        symlink_abspath = self.path_on_filesystem(path)
+        datafile_abspath = self.data_file_path(file_bytes)
+        symlink_dir = dirname(symlink_abspath)
+        self.ensure_dir(symlink_dir)
+        logger.debug(
+            "[STORAGE] putting at %s (linked to: %s)", symlink_abspath, datafile_abspath
+        )
+        self.ensure_data_file_exists(datafile_abspath, file_bytes)
 
         if self.context.request.max_age is not None:
-            with open(temp_abspath + Storage.EXPIRE_EXT, "wb") as _file:
+            expirefile_abspath = symlink_abspath + Storage.EXPIRE_EXT
+            with open(expirefile_abspath, "wb") as _file:
                 self.write_expire_file(_file)
-            move(temp_abspath + Storage.EXPIRE_EXT, file_abspath + Storage.EXPIRE_EXT)
 
-        logger.debug("moving tempfile %s to %s...", temp_abspath, file_abspath)
-        move(temp_abspath, file_abspath)
+        if exists(symlink_abspath):
+            remove(symlink_abspath)
 
+        link(datafile_abspath, symlink_abspath)
         return path
 
     def write_expire_file(self, _file):
@@ -56,6 +55,13 @@ class Storage(storages.BaseStorage):
         
         if self.context.request.max_age_shared is not None:
             _file.write(str.encode("," + str(self.context.request.max_age_shared)))
+
+    def ensure_data_file_exists(self, path, data):
+        if exists(path):
+            return
+
+        with open(path, "wb") as _file:
+            _file.write(data)
 
     async def put_crypto(self, path):
         if not self.context.config.STORES_CRYPTO_KEY_FOR_EACH_IMAGE:
@@ -142,8 +148,17 @@ class Storage(storages.BaseStorage):
 
         return loads(open(path, "r").read())
 
-    def path_on_filesystem(self, path):
-        digest = hashlib.sha1(path.encode("utf-8")).hexdigest()
+    def data_file_path(self, hash_data):
+        digest = hashlib.sha1(hash_data).hexdigest()
+        return "%s/files/%s/%s/%s" % (
+            self.context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"),
+            digest[:2],
+            digest[2:4],
+            digest[4:],
+        )
+
+    def path_on_filesystem(self, hash_data):
+        digest = hashlib.sha1(hash_data.encode("utf-8")).hexdigest()
         return "%s/%s/%s" % (
             self.context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"),
             digest[:2],
@@ -159,7 +174,7 @@ class Storage(storages.BaseStorage):
         if max_age_shared is not None:
             expire_time = max_age_shared
 
-        return os.path.exists(path_on_filesystem) and not self.__is_expired(path_on_filesystem, expire_time)
+        return exists(path_on_filesystem) and not self.__is_expired(path_on_filesystem, expire_time)
 
     async def remove(self, path):
         n_path = self.path_on_filesystem(path)
