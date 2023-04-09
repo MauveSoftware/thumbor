@@ -10,7 +10,7 @@
 
 import hashlib
 from datetime import datetime
-from os import link, remove
+from os import symlink, remove
 from os.path import abspath, dirname, exists, getmtime, isdir, isfile, join
 from urllib.parse import unquote
 
@@ -64,7 +64,7 @@ class Storage(BaseStorage):
         if exists(symlink_abspath):
             remove(symlink_abspath)
 
-        link(datafile_abspath, symlink_abspath)
+        symlink(datafile_abspath, symlink_abspath)
 
     def ensure_data_file_exists(self, path, data):
         if exists(path):

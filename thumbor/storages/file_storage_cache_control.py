@@ -12,7 +12,7 @@ import hashlib
 import os
 from datetime import datetime
 from json import dumps, loads
-from os import link, remove
+from os import symlink, remove
 from os.path import dirname, exists, getmtime, splitext
 from shutil import move
 
@@ -47,7 +47,7 @@ class Storage(storages.BaseStorage):
         if exists(symlink_abspath):
             remove(symlink_abspath)
 
-        link(datafile_abspath, symlink_abspath)
+        symlink(datafile_abspath, symlink_abspath)
         return path
 
     def write_expire_file(self, _file):
