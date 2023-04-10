@@ -43,7 +43,8 @@ class Storage(BaseStorage):
         symlink_abspath = self.normalize_path(self.context.request.url)
         self.cache.put(symlink_abspath, 
                        image_bytes, 
-                       self.context.request.max_age, self.context.request.max_age_shared)
+                       self.context.request.max_age,
+                       self.context.request.max_age_shared)
 
     async def get(self):
         if self.context.request.bypass_cache:
