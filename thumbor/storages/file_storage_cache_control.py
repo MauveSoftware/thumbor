@@ -17,10 +17,11 @@ from thumbor.utils import logger
 
 class Storage(storages.BaseStorage):
 
+    @property
     def cache(self):
         return FileCache("STORAGE", 
-                         self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"), 
-                         0)
+                         self.context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"), 
+                         self.context.config.get("STORAGE_EXPIRATION_SECONDS", None))
 
     async def put(self, path, file_bytes):
         if self.context.request.max_age_shared is not None and self.context.request.max_age_shared == 0:
@@ -30,7 +31,7 @@ class Storage(storages.BaseStorage):
             return
 
         file_abspath = self.path_on_filesystem(path)
-        self.cache().put(file_abspath, 
+        self.cache.put(file_abspath, 
                        file_bytes, 
                        self.context.request.max_age, 
                        self.context.request.max_age_shared)
@@ -41,7 +42,7 @@ class Storage(storages.BaseStorage):
             return None
 
         abs_path = self.path_on_filesystem(path)
-        cache_res = self.cache().get(abs_path)
+        cache_res = self.cache.get(abs_path)
         if not cache_res.found:
             return None
 
@@ -59,7 +60,7 @@ class Storage(storages.BaseStorage):
         if path_on_filesystem is None:
             path_on_filesystem = self.path_on_filesystem(path)
 
-        return self.cache().exists(path_on_filesystem)
+        return self.cache.exists(path_on_filesystem)
 
     async def remove(self, path):
         n_path = self.path_on_filesystem(path)
