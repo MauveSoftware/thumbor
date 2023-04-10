@@ -35,6 +35,7 @@ class Storage(storages.BaseStorage):
                        file_bytes, 
                        self.context.request.max_age, 
                        self.context.request.max_age_shared)
+        return path
 
     async def get(self, path):
         if self.context.request.bypass_cache:
