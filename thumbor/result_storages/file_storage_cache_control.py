@@ -27,7 +27,7 @@ class Storage(BaseStorage):
     def __init__(self, context):
         super().__init__(context)
         self.cache = FileCache("RESULT_STORAGES",
-                               self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"),
+                               context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"),
                                0)
 
     @property

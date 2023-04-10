@@ -8,7 +8,6 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
-from functools import cache
 import hashlib
 from thumbor.cache.file_cache import FileCache
 
@@ -20,8 +19,8 @@ class Storage(storages.BaseStorage):
     def __init__(self, context):
         super().__init__(context)
         self.cache = FileCache("STORAGE", 
-                               self.context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"),
-                               self.context.config.get("STORAGE_EXPIRATION_SECONDS", None))
+                               context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"),
+                               context.config.get("STORAGE_EXPIRATION_SECONDS", None))
 
     async def put(self, path, file_bytes):
         if self.context.request.max_age_shared is not None and self.context.request.max_age_shared == 0:
