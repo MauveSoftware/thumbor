@@ -10,8 +10,7 @@
 
 import hashlib
 from datetime import datetime
-from os import symlink, remove
-from os.path import abspath, dirname, exists, getmtime, isdir, isfile, join
+from os.path import getmtime
 from urllib.parse import unquote
 
 import pytz
@@ -26,9 +25,11 @@ class Storage(BaseStorage):
 
     def __init__(self, context):
         super().__init__(context)
-        self.cache = FileCache("RESULT_STORAGES",
-                               context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"),
-                               0)
+
+    def cache(self):
+        return FileCache("RESULT_STORAGE", 
+                         self.context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"), 
+                         self.context.config.get("STORAGE_EXPIRATION_SECONDS", None))
 
     @property
     def is_auto_webp(self):
@@ -42,7 +43,7 @@ class Storage(BaseStorage):
             return
 
         symlink_abspath = self.normalize_path(self.context.request.url)
-        self.cache.put(symlink_abspath, 
+        self.cache().put(symlink_abspath, 
                        image_bytes, 
                        self.context.request.max_age, self.context.request.max_age_shared)
 
@@ -53,7 +54,7 @@ class Storage(BaseStorage):
 
         path = self.context.request.url
         file_abspath = self.normalize_path(path)
-        cache_res = self.cache.get(file_abspath)
+        cache_res = self.cache().get(file_abspath)
         if not cache_res.found:
             return None
 
@@ -88,7 +89,7 @@ class Storage(BaseStorage):
         path = self.context.request.url
         file_abspath = self.normalize_path(path)
 
-        if not self.cache.exists(file_abspath):
+        if not self.cache().exists(file_abspath):
             logger.debug("[RESULT_STORAGE] image not found or expired at %s", file_abspath)
             return True
 

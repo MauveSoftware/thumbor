@@ -27,7 +27,7 @@ ENV SHELL bash
 ENV WORKON_HOME /app
 WORKDIR /app
 
-RUN mkdir /etc/circus.d /data
+RUN mkdir -p /etc/circus.d /data
 ADD docker/conf/circus.ini /etc/
 COPY docker/conf/thumbor.conf.tpl /app/thumbor.conf.tpl
 ADD docker/conf/thumbor-circus.ini.tpl /etc/circus.d/
