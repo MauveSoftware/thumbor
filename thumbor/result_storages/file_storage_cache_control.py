@@ -10,10 +10,9 @@
 
 import hashlib
 from datetime import datetime
+from os import symlink, remove
 from os.path import abspath, dirname, exists, getmtime, isdir, isfile, join
-from shutil import move
 from urllib.parse import unquote
-from uuid import uuid4
 
 import pytz
 
@@ -36,30 +35,46 @@ class Storage(BaseStorage):
         if self.context.request.max_age_shared is None and self.context.request.max_age is not None and self.context.request.max_age == 0:
             return
 
-        file_abspath = self.normalize_path(self.context.request.url)
-        if not self.validate_path(file_abspath):
+        symlink_abspath = self.normalize_path(self.context.request.url)
+        if not self.validate_path(symlink_abspath):
             logger.warning(
-                "[RESULT_STORAGE] unable to write outside root path: %s", file_abspath
+                "[RESULT_STORAGE] unable to write outside root path: %s", symlink_abspath
             )
             return
 
-        temp_abspath = "%s.%s" % (file_abspath, str(uuid4()).replace("-", ""))
-        file_dir_abspath = dirname(file_abspath)
+        datafile_abspath = self.data_file_path(image_bytes)
+        if not self.validate_path(datafile_abspath):
+            logger.warning(
+                "[RESULT_STORAGE] unable to write outside root path: %s", datafile_abspath
+            )
+            return
+
+        symlink_dir = dirname(symlink_abspath)
+        self.ensure_dir(symlink_dir)
         logger.debug(
-            "[RESULT_STORAGE] putting at %s (%s)", file_abspath, file_dir_abspath
+            "[RESULT_STORAGE] putting at %s (linked to: %s)", symlink_abspath, datafile_abspath
         )
-
-        self.ensure_dir(file_dir_abspath)
-
-        with open(temp_abspath, "wb") as _file:
-            _file.write(image_bytes)
+        self.ensure_data_file_exists(datafile_abspath, image_bytes)
 
         if self.context.request.max_age is not None:
-            with open(temp_abspath + Storage.EXPIRE_EXT, "wb") as _file:
+            expirefile_abspath = symlink_abspath + Storage.EXPIRE_EXT
+            with open(expirefile_abspath, "wb") as _file:
                 self.write_expire_file(_file)
-            move(temp_abspath + Storage.EXPIRE_EXT, file_abspath + Storage.EXPIRE_EXT)
 
-        move(temp_abspath, file_abspath)
+        if exists(symlink_abspath):
+            remove(symlink_abspath)
+
+        symlink(datafile_abspath, symlink_abspath)
+
+    def ensure_data_file_exists(self, path, data):
+        if exists(path):
+            return
+
+        dir = dirname(path)
+        self.ensure_dir(dir)
+
+        with open(path, "wb") as _file:
+            _file.write(data)
 
     def write_expire_file(self, _file):
         _file.write(str.encode(str(self.context.request.max_age)))
@@ -91,17 +106,8 @@ class Storage(BaseStorage):
             return None
 
         if not exists(file_abspath):
-            legacy_path = self.normalize_path_legacy(path)
-            if isfile(legacy_path):
-                logger.debug(
-                    "[RESULT_STORAGE] migrating image from old location at %s",
-                    legacy_path,
-                )
-                self.ensure_dir(dirname(file_abspath))
-                move(legacy_path, file_abspath)
-            else:
-                logger.debug("[RESULT_STORAGE] image not found at %s", file_abspath)
-                return None
+            logger.debug("[RESULT_STORAGE] image not found at %s", file_abspath)
+            return None
 
         max_age, max_age_shared = self.get_expire_time(file_abspath)
         expire_time = max_age
@@ -148,19 +154,15 @@ class Storage(BaseStorage):
             digest[4:],
         )
 
-    def normalize_path_legacy(self, path):
-        path = unquote(path)
-        path_segments = [
+    def data_file_path(self, hash_data):
+        digest = hashlib.sha1(hash_data).hexdigest()
+
+        return "%s/files/%s/%s/%s" % (
             self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"),
-            Storage.PATH_FORMAT_VERSION,
-        ]
-        if self.is_auto_webp:
-            path_segments.append("webp")
-
-        path_segments.extend([self.partition(path), path.lstrip("/")])
-
-        normalized_path = join(*path_segments).replace("http://", "")
-        return normalized_path
+            digest[:2],
+            digest[2:4],
+            digest[4:],
+        )
 
     def partition(self, path_raw):
         path = path_raw.lstrip("/")
