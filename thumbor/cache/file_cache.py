@@ -66,8 +66,14 @@ class FileCache:
             return False, None, None
 
         if expire_file.is_expired():
+            logger.debug(
+                f"[{self.name}] cache for {path} is expired"
+            )
             return False, None, None
-        
+
+        logger.debug(
+            f"[{self.name}] found {path} in cache ({expire_file.max_age}, {expire_file.max_age_shared})"
+        )
         return os.path.exists, expire_file.max_age, expire_file.max_age_shared
 
 
@@ -82,6 +88,9 @@ class FileCache:
 
 
     def ensure_data_file_exists(self, path, data):
+        logger.debug(
+            f"[{self.name}] write data file to {path}"
+        )
         if os.path.exists(path):
             return
 
@@ -114,6 +123,9 @@ class FileCache:
 
 
     def remove(self, path):
+        logger.debug(
+            f"[{self.name}] delete cache for path {path}"
+        )
         if os.path.exists(path):
             os.remove(path)
 

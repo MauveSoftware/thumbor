@@ -33,6 +33,7 @@ class Storage(BaseStorage):
     def is_auto_webp(self):
         return self.context.config.AUTO_WEBP and self.context.request.accepts_webp
 
+
     async def put(self, image_bytes):
         if self.context.request.max_age_shared is not None and self.context.request.max_age_shared == 0:
             return
@@ -46,6 +47,7 @@ class Storage(BaseStorage):
                        self.context.request.max_age,
                        self.context.request.max_age_shared)
 
+
     async def get(self):
         if self.context.request.bypass_cache:
             logger.info("[RESULT_STORAGE] bypassing cache for %s", self.context.request.url)
@@ -53,24 +55,25 @@ class Storage(BaseStorage):
 
         path = self.context.request.url
         file_abspath = self.normalize_path(path)
-        cache_res = self.cache.get(file_abspath)
-        if not cache_res.found:
+        res = self.cache.get(file_abspath)
+        if not res.found:
             return None
 
-        if cache_res.max_age is not None:
-            self.context.request.max_age = cache_res.max_age
-            self.context.request.max_age_shared = cache_res.max_age_shared
+        if res.max_age is not None:
+            self.context.request.max_age = res.max_age
+            self.context.request.max_age_shared = res.max_age_shared
 
         return ResultStorageResult(
-            buffer=cache_res.data,
+            buffer=res.data,
             metadata={
                 "LastModified": datetime.fromtimestamp(getmtime(file_abspath)).replace(
                     tzinfo=pytz.utc
                 ),
-                "ContentLength": len(cache_res.data),
-                "ContentType": BaseEngine.get_mimetype(cache_res.data),
+                "ContentLength": len(res.data),
+                "ContentType": BaseEngine.get_mimetype(res.data),
             },
         )
+
 
     def normalize_path(self, path):
         digest = hashlib.sha1(unquote(path).encode("utf-8")).hexdigest()
@@ -82,6 +85,7 @@ class Storage(BaseStorage):
             digest[2:4],
             digest[4:],
         )
+
 
     @deprecated("Use result's last_modified instead")
     def last_updated(self):
