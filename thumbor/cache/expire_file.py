@@ -12,7 +12,7 @@ import os.path
 from datetime import datetime
 
 class ExpireFile:
-    def __init__(self, default_expiration: int):
+    def __init__(self, default_expiration: int = 0):
         self.max_age = default_expiration
         self.max_age_shared = None
         self.change_date = datetime.now()
