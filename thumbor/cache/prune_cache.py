@@ -9,13 +9,13 @@
 # Copyright (c) 2023 Mauve Mailorder Software 
 
 import os
+from os.path import isdir
 import sys
 
 from thumbor.cache.expire_file import ExpireFile
 from thumbor.cache.file_cache import FileCache
 
 def prune_file_if_expired(f: str, file_cache: FileCache):
-    print(f'check if {f} is exired')
     expire_file = ExpireFile()
     if not expire_file.load(f):
         print(f'could not load expire file: {f}')
@@ -26,16 +26,41 @@ def prune_file_if_expired(f: str, file_cache: FileCache):
         file_cache.remove(f.replace(file_cache.EXPIRE_EXT, ""))
 
 
-def prune_directory(dir: str, file_cache: FileCache):
+def prune_expired_links(dir: str, file_cache: FileCache):
     print(f'enter directory {dir}')
     for name in os.listdir(dir):
         f = os.path.join(dir, name)
 
-        if os.path.isdir(f):
-            prune_directory(f, file_cache)
+        if os.path.isdir(f) and not name == "files":
+            prune_expired_links(f, file_cache)
+            return
             
         if os.path.isfile(f) and f.endswith(file_cache.EXPIRE_EXT):
             prune_file_if_expired(f, file_cache)
+            return
+
+
+def prune_expired_data_files_in_dir(dir: str):
+    for name in os.listdir(dir):
+        f = os.path.join(dir, name)
+        if os.path.isdir(f):
+            prune_expired_data_files_in_dir(dir)
+            return
+
+        stat = os.stat(f)
+        if stat.st_nlink == 1:
+            os.remove(f)
+
+
+def prune_expired_data_files(dir: str):
+    for name in os.listdir(dir):
+        f = os.path.join(dir, name)
+        if not os.path.isdir(f):
+            continue
+
+        files_dir = os.path.join(f, "files")
+        if os.path.exists(files_dir):
+            prune_expired_data_files_in_dir(files_dir)
 
 
 dir = sys.argv[1]
@@ -44,4 +69,8 @@ if not os.path.exists(dir):
     os._exit(1)
 
 file_cache = FileCache("", dir, 0)
-prune_directory(dir, file_cache)
+print(f'Prune expired links')
+prune_expired_links(dir, file_cache)
+
+print(f'Prune data files not linked any more')
+prune_expired_data_files(dir)

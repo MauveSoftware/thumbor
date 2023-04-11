@@ -39,6 +39,7 @@ RUN chown www-data -R /etc/circus.d /app /data && \
     python3 setup.py build && \
     python3 setup.py install && \
     cd /app && \
+    cp /opt/thumbor/thumbor/cache/prune_cache.py /app/prune_cache.py && \
     rm -R /opt/thumbor && \
     pip3 install --trusted-host None --no-cache-dir -r /app/requirements.txt
 
