@@ -41,6 +41,7 @@ def prune_expired_links(dir: str, file_cache: FileCache):
 
 
 def prune_expired_data_files_in_dir(dir: str):
+    print(f'enter directory {dir}')
     for name in os.listdir(dir):
         f = os.path.join(dir, name)
         if os.path.isdir(f):
@@ -49,6 +50,7 @@ def prune_expired_data_files_in_dir(dir: str):
 
         stat = os.stat(f)
         if stat.st_nlink == 1:
+            print(f'delete {f}')
             os.remove(f)
 
 
