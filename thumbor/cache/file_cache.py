@@ -33,8 +33,8 @@ class FileCache:
 
     def put(self, path: str, data, max_age: int, max_age_shared):
         data_file_path = self.data_file_path(data)
-        symlink_dir = os.path.dirname(path)
-        self.ensure_dir(symlink_dir)
+        link_dir = os.path.dirname(path)
+        self.ensure_dir(link_dir)
         logger.debug(
             f"[{self.name}] putting at {path} (linked to: {data_file_path})"
         )
@@ -45,7 +45,7 @@ class FileCache:
         if os.path.exists(path):
             os.remove(path)
 
-        os.symlink(data_file_path, path)
+        os.link(data_file_path, path)
 
 
     def get(self, path):
@@ -122,6 +122,12 @@ class FileCache:
                     raise
 
 
+    def remove_expire_file(self, path):
+        expire_file_path = path + self.EXPIRE_EXT
+        if os.path.exists(expire_file_path):
+            os.remove(expire_file_path)
+
+
     def remove(self, path):
         logger.debug(
             f"[{self.name}] delete cache for path {path}"
@@ -129,6 +135,4 @@ class FileCache:
         if os.path.exists(path):
             os.remove(path)
 
-        expire_file_path = path + self.EXPIRE_EXT
-        if os.path.exists(expire_file_path):
-            os.remove(expire_file_path)
+        self.remove_expire_file(path)
