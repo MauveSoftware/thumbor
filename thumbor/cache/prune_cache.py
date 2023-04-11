@@ -45,7 +45,7 @@ def prune_expired_data_files_in_dir(dir: str):
     for name in os.listdir(dir):
         f = os.path.join(dir, name)
         if os.path.isdir(f):
-            prune_expired_data_files_in_dir(dir)
+            prune_expired_data_files_in_dir(f)
             return
 
         stat = os.stat(f)
