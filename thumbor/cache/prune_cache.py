@@ -33,11 +33,11 @@ def prune_expired_links(dir: str, file_cache: FileCache):
 
         if os.path.isdir(f) and not name == "files":
             prune_expired_links(f, file_cache)
-            return
+            continue
             
         if os.path.isfile(f) and f.endswith(file_cache.EXPIRE_EXT):
             prune_file_if_expired(f, file_cache)
-            return
+            continue
 
 
 def prune_expired_data_files_in_dir(dir: str):
@@ -46,7 +46,7 @@ def prune_expired_data_files_in_dir(dir: str):
         f = os.path.join(dir, name)
         if os.path.isdir(f):
             prune_expired_data_files_in_dir(f)
-            return
+            continue
 
         stat = os.stat(f)
         if stat.st_nlink == 1:
