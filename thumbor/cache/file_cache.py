@@ -74,7 +74,7 @@ class FileCache:
         logger.debug(
             f"[{self.name}] found {path} in cache ({expire_file.max_age}, {expire_file.max_age_shared})"
         )
-        return os.path.exists, expire_file.max_age, expire_file.max_age_shared
+        return os.path.exists(path), expire_file.max_age, expire_file.max_age_shared
 
 
     def write_expire_file(self, path, max_age, max_age_shared):
