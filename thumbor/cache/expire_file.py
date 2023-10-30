@@ -55,7 +55,7 @@ class ExpireFile:
             max_age = 0
 
         _file.write(str.encode(str(max_age)))
-        
+
         if self.max_age_shared is not None:
             _file.write(str.encode("," + str(self.max_age_shared)))
 

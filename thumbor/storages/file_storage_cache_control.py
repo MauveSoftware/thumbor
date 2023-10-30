@@ -36,10 +36,15 @@ class Storage(storages.BaseStorage):
             return
 
         file_abspath = self.path_on_filesystem(path)
-        self.cache.put(file_abspath, 
-                       file_bytes, 
-                       self.context.request.max_age, 
-                       self.context.request.max_age_shared)
+        try:
+            self.cache.put(file_abspath, 
+                           file_bytes, 
+                           self.context.request.max_age, 
+                           self.context.request.max_age_shared)
+        except IOError as e:
+            logger.error("[STORAGE] error persisting cache item: %s", e.strerror)
+            return
+
         return path
 
 

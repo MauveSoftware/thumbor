@@ -42,10 +42,13 @@ class Storage(BaseStorage):
             return
 
         symlink_abspath = self.normalize_path(self.context.request.url)
-        self.cache.put(symlink_abspath, 
-                       image_bytes, 
-                       self.context.request.max_age,
-                       self.context.request.max_age_shared)
+        try:
+            self.cache.put(symlink_abspath, 
+                           image_bytes, 
+                           self.context.request.max_age,
+                           self.context.request.max_age_shared)
+        except IOError as e:
+            logger.error("[RESULT_STORAGE] error persisting item to result cache: %s", e.strerror)
 
 
     async def get(self):

@@ -34,7 +34,7 @@ def prune_expired_links(dir: str, file_cache: FileCache):
         if os.path.isdir(f) and not name == "files":
             prune_expired_links(f, file_cache)
             continue
-            
+
         if os.path.isfile(f) and f.endswith(file_cache.EXPIRE_EXT):
             prune_file_if_expired(f, file_cache)
             continue

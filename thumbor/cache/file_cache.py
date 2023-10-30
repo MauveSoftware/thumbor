@@ -52,7 +52,7 @@ class FileCache:
         exists, max_age, max_age_shared = self.exists(path)
         if not exists:
             return FileCacheResult(False)
-        
+
         with open(path, "rb") as source_file:
             return FileCacheResult(True, source_file.read(), max_age, max_age_shared)
 
