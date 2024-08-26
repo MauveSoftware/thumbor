@@ -8,17 +8,16 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
-import os
 from io import BytesIO
-from subprocess import PIPE, Popen
-from tempfile import mkstemp
 
+import piexif
+from JpegIPTC import JpegIPTC
 from PIL import Image, ImageDraw, ImageFile, ImageSequence, JpegImagePlugin
 from PIL import features as pillow_features
 
 from thumbor.engines import BaseEngine
-from thumbor.engines.extensions.pil import GifWriter
-from thumbor.utils import deprecated, logger
+from thumbor.filters.fill import Filter
+from thumbor.utils import deprecated, ensure_srgb, get_color_space, logger
 
 try:
     from thumbor.ext.filters import _composite
@@ -27,6 +26,23 @@ try:
 except ImportError:
     FILTERS_AVAILABLE = False
 
+try:
+    from PIL import _avif  # pylint: disable=ungrouped-imports
+except ImportError:
+    try:
+        from pillow_avif import _avif
+    except ImportError:
+        _avif = None
+
+try:
+    from pillow_heif import HeifImagePlugin
+except ImportError:
+    HeifImagePlugin = None
+
+HAVE_AVIF = _avif is not None
+HAVE_HEIF = HeifImagePlugin is not None
+
+
 FORMATS = {
     ".tif": "PNG",  # serve tif as png
     ".jpg": "JPEG",
@@ -34,12 +50,22 @@ FORMATS = {
     ".gif": "GIF",
     ".png": "PNG",
     ".webp": "WEBP",
+    ".avif": "AVIF",
+    ".heic": "HEIF",
+    ".heif": "HEIF",
 }
 
-ImageFile.MAXBLOCK = 2 ** 25
+KEEP_EXIF_COPYRIGHT_TAGS = [
+    piexif.ImageIFD.Artist,
+    piexif.ImageIFD.Copyright,
+    piexif.ImageIFD.DateTime,
+]
+
+ImageFile.MAXBLOCK = 2**25
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 DECOMPRESSION_BOMB_EXCEPTIONS = (Image.DecompressionBombWarning,)
+
 if hasattr(Image, "DecompressionBombError"):
     DECOMPRESSION_BOMB_EXCEPTIONS += (Image.DecompressionBombError,)
 
@@ -51,6 +77,7 @@ class Engine(BaseEngine):
         self.qtables = None
         self.original_mode = None
         self.exif = None
+        self.iptc = None
 
         try:
             if self.context.config.MAX_PIXELS is None or int(
@@ -65,7 +92,12 @@ class Engine(BaseEngine):
     def gen_image(self, size, color):
         if color == "transparent":
             color = None
+        elif color == "auto":
+            color = Filter.get_median_color(self.context.modules)
+            color = f"#{color}"
+
         img = Image.new("RGBA", size, color)
+
         return img
 
     def create_image(self, buffer):
@@ -73,25 +105,58 @@ class Engine(BaseEngine):
             img = Image.open(BytesIO(buffer))
         except DECOMPRESSION_BOMB_EXCEPTIONS as error:
             logger.warning("[PILEngine] create_image failed: %s", error)
+
             return None
         self.icc_profile = img.info.get("icc_profile")
         self.exif = img.info.get("exif")
         self.original_mode = img.mode
 
-        self.subsampling = JpegImagePlugin.get_sampling(img)
-        if self.subsampling == -1:  # n/a for this file
-            self.subsampling = None
+        if self.context.config.PRESERVE_IPTC_INFO:
+            jpegiptc_object = JpegIPTC()
+            jpegiptc_object.load_from_binarydata(buffer)
+            self.iptc = jpegiptc_object.get_raw_iptc()
+
+        if hasattr(img, "layer"):
+            self.subsampling = JpegImagePlugin.get_sampling(img)
+            if self.subsampling == -1:  # n/a for this file
+                self.subsampling = None
+
         self.qtables = getattr(img, "quantization", None)
 
-        if self.context.config.ALLOW_ANIMATED_GIFS and self.extension == ".gif":
+        if (
+            self.context.config.ALLOW_ANIMATED_GIFS
+            and self.extension == ".gif"
+        ):
             frames = []
+
             for frame in ImageSequence.Iterator(img):
                 frames.append(frame.convert("P"))
             img.seek(0)
             self.frame_count = len(frames)
+
             return frames
 
         return img
+
+    def get_exif_copyright(self):
+        try:
+            exifs = piexif.load(self.image.info.get("exif"))
+        except Exception:
+            return self.image.info.get("exif")
+
+        return self.extract_copyright_from_exif(exifs)
+
+    def extract_copyright_from_exif(self, exifs):
+        copyright_exif = {}
+
+        if exifs is None or "0th" not in exifs or exifs["0th"] is None:
+            return None
+
+        for copyright_tag in KEEP_EXIF_COPYRIGHT_TAGS:
+            if copyright_tag in exifs["0th"]:
+                copyright_exif[copyright_tag] = exifs["0th"][copyright_tag]
+
+        return piexif.dump({"0th": copyright_exif})
 
     def get_resize_filter(self):
         config = self.context.config
@@ -102,14 +167,14 @@ class Engine(BaseEngine):
         )
 
         available = {
-            "LANCZOS": Image.LANCZOS,
-            "NEAREST": Image.NEAREST,
-            "BILINEAR": Image.BILINEAR,
-            "BICUBIC": Image.BICUBIC,
-            "HAMMING": Image.HAMMING,
+            "LANCZOS": Image.Resampling.LANCZOS,
+            "NEAREST": Image.Resampling.NEAREST,
+            "BILINEAR": Image.Resampling.BILINEAR,
+            "BICUBIC": Image.Resampling.BICUBIC,
+            "HAMMING": Image.Resampling.HAMMING,
         }
 
-        return available.get(resample.upper(), Image.LANCZOS)
+        return available.get(resample.upper(), Image.Resampling.LANCZOS)
 
     def draw_rectangle(self, x, y, width, height):
         # Nasty retry if the image is loaded for the first time and it's truncated
@@ -125,10 +190,12 @@ class Engine(BaseEngine):
         # Indexed color modes (such as 1 and P) will be forced to use a
         # nearest neighbor resampling algorithm. So we convert them to
         # RGB(A) mode before resizing to avoid nasty scaling artifacts.
+
         if self.image.mode in ["1", "P"]:
             logger.debug(
                 "converting image from 8-bit/1-bit palette to 32-bit RGB(A) for resize"
             )
+
             if self.image.mode == "1":
                 target_mode = "RGB"
             else:
@@ -144,33 +211,40 @@ class Engine(BaseEngine):
         self.image = self.image.resize(size, resample)
 
     def crop(self, left, top, right, bottom):
-        self.image = self.image.crop((int(left), int(top), int(right), int(bottom)))
+        self.image = self.image.crop(
+            (int(left), int(top), int(right), int(bottom))
+        )
 
     def rotate(self, degrees):
         # PIL rotates counter clockwise
+
         if degrees == 90:
-            self.image = self.image.transpose(Image.ROTATE_90)
+            self.image = self.image.transpose(Image.Transpose.ROTATE_90)
         elif degrees == 180:
-            self.image = self.image.transpose(Image.ROTATE_180)
+            self.image = self.image.transpose(Image.Transpose.ROTATE_180)
         elif degrees == 270:
-            self.image = self.image.transpose(Image.ROTATE_270)
+            self.image = self.image.transpose(Image.Transpose.ROTATE_270)
         else:
             self.image = self.image.rotate(degrees, expand=1)
 
     def flip_vertically(self):
-        self.image = self.image.transpose(Image.FLIP_TOP_BOTTOM)
+        self.image = self.image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
 
     def flip_horizontally(self):
-        self.image = self.image.transpose(Image.FLIP_LEFT_RIGHT)
+        self.image = self.image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
 
     def get_default_extension(self):
         # extension is not present => force JPEG or PNG
+
         if self.image.mode in ["P", "RGBA", "LA"]:
             return ".png"
+
         return ".jpeg"
 
-    # TODO: Refactor this - pylint: disable=too-many-statements,too-many-branches
-    def read(self, extension=None, quality=None):  # NOQA
+    # TODO: Refactor this
+    def read(  # noqa
+        self, extension=None, quality=None
+    ):  # noqa pylint: disable=too-many-statements,too-many-branches
         # returns image buffer in byte format.
 
         img_buffer = BytesIO()
@@ -178,6 +252,7 @@ class Engine(BaseEngine):
 
         # 1 and P mode images will be much smaller if converted back to
         # their original mode. So let's do that after resizing. Get $$.
+
         if (
             self.context.config.PILLOW_PRESERVE_INDEXED_MODE
             and requested_extension in [None, ".png", ".gif"]
@@ -190,7 +265,7 @@ class Engine(BaseEngine):
                 # libimagequant might not be enabled on compile time
                 # but it's better than default octree for RGBA images
                 quantize_method = (
-                    Image.LIBIMAGEQUANT
+                    Image.Quantize.LIBIMAGEQUANT
                     if pillow_features.check("libimagequant")
                     else None
                 )
@@ -198,9 +273,25 @@ class Engine(BaseEngine):
 
         ext = requested_extension or self.get_default_extension()
 
+        if ext in (".heic", ".heif") and not HAVE_HEIF:
+            logger.warning(
+                "[PILEngine] HEIF encoding unavailable, defaulting to %s",
+                self.extension,
+            )
+            ext = self.extension
+
+        if ext == ".avif" and not HAVE_AVIF:
+            logger.warning(
+                "[PILEngine] AVIF encoding unavailable, defaulting to %s",
+                self.extension,
+            )
+            ext = self.extension
+
         options = {"quality": quality}
+
         if ext in (".jpg", ".jpeg"):
             options["optimize"] = True
+
             if self.context.config.PROGRESSIVE_JPEG:
                 # Can't simply set options['progressive'] to the value
                 # of self.context.config.PROGRESSIVE_JPEG because save
@@ -211,10 +302,15 @@ class Engine(BaseEngine):
             if self.image.mode != "RGB":
                 self.image = self.image.convert("RGB")
             else:
-                subsampling_config = self.context.config.PILLOW_JPEG_SUBSAMPLING
+                subsampling_config = (
+                    self.context.config.PILLOW_JPEG_SUBSAMPLING
+                )
                 qtables_config = self.context.config.PILLOW_JPEG_QTABLES
 
-                if subsampling_config is not None or qtables_config is not None:
+                if (
+                    subsampling_config is not None
+                    or qtables_config is not None
+                ):
                     # can't use 'keep' here as Pillow would try to extract
                     # qtables/subsampling and fail
                     options["quality"] = 0
@@ -223,27 +319,84 @@ class Engine(BaseEngine):
                     orig_qtables = self.qtables
 
                     if (
-                        subsampling_config == "keep" or subsampling_config is None
+                        subsampling_config == "keep"
+                        or subsampling_config is None
                     ) and (orig_subsampling is not None):
                         options["subsampling"] = orig_subsampling
                     else:
                         options["subsampling"] = subsampling_config
 
-                    if (qtables_config == "keep" or qtables_config is None) and (
-                        orig_qtables and 2 <= len(orig_qtables) <= 4
-                    ):
+                    if (
+                        qtables_config == "keep" or qtables_config is None
+                    ) and (orig_qtables and 2 <= len(orig_qtables) <= 4):
                         options["qtables"] = orig_qtables
                     else:
                         options["qtables"] = qtables_config
 
-        if ext == ".png" and self.context.config.PNG_COMPRESSION_LEVEL is not None:
-            options["compress_level"] = self.context.config.PNG_COMPRESSION_LEVEL
+        if (
+            ext == ".png"
+            and self.context.config.PNG_COMPRESSION_LEVEL is not None
+        ):
+            options["compress_level"] = (
+                self.context.config.PNG_COMPRESSION_LEVEL
+            )
 
         if options["quality"] is None:
             options["quality"] = self.context.config.QUALITY
 
+        if ext == ".avif":
+            options["codec"] = self.context.config.AVIF_CODEC
+            if self.context.config.AVIF_SPEED:
+                options["speed"] = self.context.config.AVIF_SPEED
+
+            if options["codec"] == "svt":
+                width, height = self.size
+                # SVT-AV1 has limits on min and max image dimension. If the
+                # image falls outside of those, use AVIF_CODEC_FALLBACK
+                if not 64 <= width <= 4096 or not 64 <= height <= 4096:
+                    options["codec"] = self.context.config.AVIF_CODEC_FALLBACK
+                elif width % 2 or height % 2:
+                    # SVT-AV1 requires width and height to be divisible by two
+                    width = (width // 2) * 2
+                    height = (height // 2) * 2
+                    self.crop(0, 0, width, height)
+
+            if options["quality"] == "keep":
+                options.pop("quality")
+
+            if self.image.mode not in ["RGB", "RGBA"]:
+                if self.image.mode == "P":
+                    mode = "RGBA"
+                else:
+                    mode = "RGBA" if self.image.mode[-1] == "A" else "RGB"
+                self.image = self.image.convert(mode)
+
+            # Some AVIF decoders (most notably the one in Chrome) do not
+            # display AVIF images if they have an embedded ICC profile with a
+            # color space that doesn't match the image's mode (e.g. if the
+            # mode is RGB but the profile is CMYK or GRAY).
+            #
+            # To address this issue we transform non-sRGB ICC profiles to sRGB
+            # if we're encoding to AVIF.
+            color_space = get_color_space(self.image)
+            if color_space not in ("RGB", None):
+                srgb_image = ensure_srgb(
+                    self.image, srgb_profile=self.context.config.SRGB_PROFILE
+                )
+                if srgb_image:
+                    self.image = srgb_image
+                    self.icc_profile = srgb_image.info.get("icc_profile")
+
         if self.icc_profile is not None:
             options["icc_profile"] = self.icc_profile
+
+        if (
+            self.context.config.PRESERVE_EXIF_COPYRIGHT_INFO is True
+            and self.image.info.get("exif") is not None
+        ):
+            exif_copyright = self.get_exif_copyright()
+            if exif_copyright is not None:
+                options["exif"] = exif_copyright
 
         if self.context.config.PRESERVE_EXIF_INFO:
             if self.exif is not None:
@@ -255,6 +408,7 @@ class Engine(BaseEngine):
                     logger.debug("webp quality is 100, using lossless instead")
                     options["lossless"] = True
                     options.pop("quality")
+
                 if self.image.mode not in ["RGB", "RGBA"]:
                     if self.image.mode == "P":
                         mode = "RGBA"
@@ -262,10 +416,16 @@ class Engine(BaseEngine):
                         mode = "RGBA" if self.image.mode[-1] == "A" else "RGB"
                     self.image = self.image.convert(mode)
 
-            if ext in [".png", ".gif"] and self.image.mode == "CMYK":
+            if (
+                ext in [".png", ".gif", ".heic", ".heif"]
+                and self.image.mode == "CMYK"
+            ):
+                # 26.10.22: remove ".heic, .heif" in a month(when pillow_heif get updated)
                 self.image = self.image.convert("RGBA")
 
-            self.image.format = FORMATS.get(ext, FORMATS[self.get_default_extension()])
+            self.image.format = FORMATS.get(
+                ext, FORMATS[self.get_default_extension()]
+            )
             self.image.save(img_buffer, self.image.format, **options)
         except IOError:
             logger.exception(
@@ -276,51 +436,31 @@ class Engine(BaseEngine):
         results = img_buffer.getvalue()
         img_buffer.close()
         self.extension = ext
+
+        if self.context.config.PRESERVE_IPTC_INFO:
+            jpegiptc_object_d = JpegIPTC()
+            jpegiptc_object_d.load_from_binarydata(results)
+            jpegiptc_object_d.set_raw_iptc(self.iptc)
+            newresults = jpegiptc_object_d.dump()
+            if newresults is not None:
+                results = newresults
+
         return results
 
     def read_multiple(self, images, extension=None):
-        gif_writer = GifWriter()
-        img_buffer = BytesIO()
-
-        duration = []
-        converted_images = []
-        coordinates = []
-        dispose = []
-
-        for image in images:
-            duration.append(image.info.get("duration", 80) / 1000)
-            converted_images.append(image.convert("RGB"))
-            coordinates.append((0, 0))
-            dispose.append(1)
-
-        loop = int(self.image.info.get("loop", 1))
-
-        images = gif_writer.convertImagesToPIL(converted_images, False, None)
-        gif_writer.writeGifToFile(
-            img_buffer, images, duration, loop, coordinates, dispose
+        self.image.format = FORMATS.get(
+            extension or self.extension, FORMATS[self.get_default_extension()]
         )
-
-        results = img_buffer.getvalue()
-        img_buffer.close()
-
-        tmp_fd, tmp_file_path = mkstemp()
-        temp_file = os.fdopen(tmp_fd, "wb")
-        temp_file.write(results)
-        temp_file.close()
-
-        command = ["gifsicle", "--colors", "256", tmp_file_path]
-
-        popen = Popen(command, stdout=PIPE)
-        pipe = popen.stdout
-        pipe_output = pipe.read()
-        pipe.close()
-
-        if popen.wait() == 0:
-            results = pipe_output
-
-        os.remove(tmp_file_path)
-
-        return results
+        with BytesIO() as img_buffer:
+            images[0].save(
+                img_buffer,
+                self.image.format,
+                save_all=True,
+                append_images=images[1:],
+                duration=[im.info.get("duration", 80) / 1000 for im in images],
+                loop=int(self.image.info.get("loop", 1)),
+            )
+            return img_buffer.getvalue()
 
     @deprecated("Use image_data_as_rgb instead.")
     def get_image_data(self):
@@ -335,6 +475,7 @@ class Engine(BaseEngine):
 
     def image_data_as_rgb(self, update_image=True):
         converted_image = self.image
+
         if converted_image.mode not in ["RGB", "RGBA"]:
             if "A" in converted_image.mode:
                 converted_image = converted_image.convert("RGBA")
@@ -343,8 +484,10 @@ class Engine(BaseEngine):
                 converted_image = converted_image.convert(None)
             else:
                 converted_image = converted_image.convert("RGB")
+
         if update_image:
             self.image = converted_image
+
         return converted_image.mode, converted_image.tobytes()
 
     def convert_to_grayscale(self, update_image=True, alpha=True):
@@ -352,19 +495,32 @@ class Engine(BaseEngine):
             image = self.image.convert("LA")
         else:
             image = self.image.convert("L")
+
         if update_image:
             self.image = image
+
         return image
 
     def has_transparency(self):
-        has_transparency = "A" in self.image.mode or "transparency" in self.image.info
+        has_transparency = (
+            "A" in self.image.mode or "transparency" in self.image.info
+        )
+
         if has_transparency:
             # If the image has alpha channel,
             # we check for any pixels that are not opaque (255)
             has_transparency = (
-                min(self.image.convert("RGBA").getchannel("A").getextrema()) < 255
+                min(self.image.convert("RGBA").getchannel("A").getextrema())
+                < 255
             )
+
         return has_transparency
+
+    def avif_enabled(self):
+        return HAVE_AVIF
+
+    def heif_enabled(self):
+        return HAVE_HEIF
 
     def paste(self, other_engine, pos, merge=True):
         if merge and not FILTERS_AVAILABLE:

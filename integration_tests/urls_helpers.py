@@ -82,6 +82,9 @@ FILTERS = [
     "filters:gifv(mp4)",
     "filters:max_age(600)",
     "filters:upscale()",
+    "filters:format(avif)",
+    "filters:format(heic)",
+    "filters:format(heif)",
     # one big filter 4-line string
     "filters:curve([(0,0),(255,255)],[(0,50),(16,51),(32,69),"
     "(58,85),(92,120),(128,170),(140,186),(167,225),"  # NOQA
@@ -98,6 +101,7 @@ ORIGINAL_IMAGES_BASE = [
     "rgba.png",
     "grayscale.jpg",
     "16bit.png",
+    "thumbor-exif.png",
 ]
 
 ORIGINAL_IMAGES_GIF_WEBP = [
@@ -107,7 +111,15 @@ ORIGINAL_IMAGES_GIF_WEBP = [
 ]
 
 ALL_OPTIONS = (
-    METAS + TRIMS + CROPS + FITINS + SIZES + H_ALIGNS + V_ALIGNS + SMARTS + FILTERS
+    METAS
+    + TRIMS
+    + CROPS
+    + FITINS
+    + SIZES
+    + H_ALIGNS
+    + V_ALIGNS
+    + SMARTS
+    + FILTERS
 )
 
 MAX_DATASET_SIZE = len(ALL_OPTIONS) * (

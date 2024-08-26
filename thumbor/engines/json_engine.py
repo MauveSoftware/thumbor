@@ -33,7 +33,9 @@ class JSONEngine(BaseEngine):
         return self.engine.size
 
     def resize(self, width, height):
-        self.operations.append({"type": "resize", "width": width, "height": height})
+        self.operations.append(
+            {"type": "resize", "width": width, "height": height}
+        )
         self.engine.resize(width, height)
         self.refresh_image()
 
@@ -121,6 +123,12 @@ class JSONEngine(BaseEngine):
     def has_transparency(self):
         return self.engine.has_transparency()
 
+    def avif_enabled(self):
+        return self.engine.avif_enabled()
+
+    def heif_enabled(self):
+        return self.engine.heif_enabled()
+
     def can_auto_convert_png_to_jpg(self):
         can_convert = super().can_auto_convert_png_to_jpg()
         if can_convert:
@@ -148,6 +156,6 @@ class JSONEngine(BaseEngine):
         thumbor_json = json.dumps(thumbor_json)
 
         if self.callback_name:
-            return "%s(%s);" % (self.callback_name, thumbor_json)
+            return f"{self.callback_name}({thumbor_json});"
 
         return thumbor_json

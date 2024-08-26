@@ -11,6 +11,7 @@ run-prod: compile_ext
 
 setup:
 	@$(PYTHON) -m pip install -e .[tests]
+	@echo  "\n\nYou are strongly recommended to run 'pre-commit install'\n"
 
 compile_ext build:
 	@$(PYTHON) setup.py build_ext -i
@@ -21,7 +22,7 @@ test: build redis
 	@$(MAKE) flake
 	@$(MAKE) kill_redis
 
-ci_test: build 
+ci_test: build
 	@echo "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
 	@echo "TORNADO IS `python -c 'import tornado; import inspect; print(inspect.getfile(tornado))'`"
 	@echo "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
@@ -44,19 +45,23 @@ sequential-unit:
 
 kill_redis:
 	@-redis-cli -p 6668 -a hey_you shutdown
+	@-redis-cli -p 26379 -a hey_you shutdown
+	@-rm /tmp/redis-sentinel.conf 2>/dev/null
 
 redis: kill_redis
+	@cp redis-sentinel.conf /tmp/redis-sentinel.conf
 	@redis-server redis.conf ; sleep 1
+	@redis-server /tmp/redis-sentinel.conf --sentinel ; sleep 1
 	@redis-cli -p 6668 -a hey_you info
 
 format:
 	@black .
 
 flake:
-	@flake8 --config flake8
+	@flake8 --config .flake8
 
 pylint:
-	@pylint thumbor tests
+	@pylint --load-plugins=pylint.extensions.no_self_use thumbor tests
 
 setup_docs:
 	@$(PYTHON) -m pip install -r docs/requirements.txt
@@ -111,6 +116,7 @@ sample_images:
 	convert tests/fixtures/images/10_years_of_Wikipedia_by_Guillaume_Paumier.jpg -orient LeftBottom tests/fixtures/images/10_years_of_Wikipedia_by_Guillaume_Paumier.jpg
 	curl -s https://upload.wikimedia.org/wikipedia/commons/6/6d/Christophe_Henner_-_June_2016.jpg -o tests/fixtures/images/Christophe_Henner_-_June_2016.jpg
 	curl -s https://upload.wikimedia.org/wikipedia/commons/3/31/Giunchedi%2C_Filippo_January_2015_01.jpg -o tests/fixtures/images/Giunchedi%2C_Filippo_January_2015_01.jpg
+	curl -s https://upload.wikimedia.org/wikipedia/commons/2/2c/Rotating_earth_%28large%29.gif -o tests/fixtures/images/Rotating_earth_\(large\).gif
 	convert tests/fixtures/images/Giunchedi%2C_Filippo_January_2015_01.jpg -colorspace CMYK tests/fixtures/images/Giunchedi%2C_Filippo_January_2015_01-cmyk.jpg
 	convert tests/fixtures/images/Giunchedi%2C_Filippo_January_2015_01.jpg tests/fixtures/images/Giunchedi%2C_Filippo_January_2015_01.png
 	convert tests/fixtures/images/Giunchedi%2C_Filippo_January_2015_01.jpg -colorspace gray tests/fixtures/images/Giunchedi%2C_Filippo_January_2015_01-grayscale.jpg
@@ -128,6 +134,7 @@ sample_images:
 	cp tests/fixtures/images/image.jpg tests/fixtures/images/alabama1_ap620é.jpg
 	mkdir -p tests/fixtures/result_storages/v2/im/ag/
 	cp tests/fixtures/images/image.jpg tests/fixtures/result_storages/v2/im/ag/image.jpg
+	mkdir -p tests/fixtures/filters
 	curl -s https://upload.wikimedia.org/wikipedia/commons/thumb/2/25/Katherine_Maher.jpg/800px-Katherine_Maher.jpg -o tests/fixtures/filters/source.jpg
 	convert tests/fixtures/filters/source.jpg -quality 10 tests/fixtures/filters/quality-10%.jpg
 	convert tests/fixtures/filters/source.jpg -rotate 180 tests/fixtures/filters/rotate.jpg
@@ -153,44 +160,14 @@ sample_images:
 	# the watermark filter's logic is too complicated to reproduce with IM, the watermark test images can't be generated here
 	# similarly, the noise, colorize, redeye and fill filters generate output too unique to be reproduce with IM and can't be generated here
 
-test-docker-build: test-docker-36-build test-docker-37-build test-docker-38-build test-docker-39-build
+test-docker-build: test-docker-39-build test-docker310-build test-docker311-build test-docker312-build
 
-test-docker-run: test-docker-36-run test-docker-37-run test-docker-38-run test-docker-39-run
+test-docker-run: test-docker-39-run test-docker-310-run test-docker311-build test-docker312-build
 
-test-docker-publish: test-docker-36-publish test-docker-37-publish test-docker-38-publish test-docker-39-publish
-
-test-docker-36-build:
-	@docker build -f TestDockerfile36 -t thumbor-test-36 .
-
-test-docker-36-run:
-	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:36 make compile_ext redis sequential-unit integration flake
-
-test-docker-36-publish:
-	@docker image tag thumbor-test-36:latest thumbororg/thumbor-test:36
-	@docker push thumbororg/thumbor-test:36
-
-test-docker-37-build:
-	@docker build -f TestDockerfile37 -t thumbor-test-37 .
-
-test-docker-37-run:
-	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:37 make compile_ext redis sequential-unit integration flake
-
-test-docker-37-publish:
-	@docker image tag thumbor-test-37:latest thumbororg/thumbor-test:37
-	@docker push thumbororg/thumbor-test:37
-
-test-docker-38-build:
-	@docker build -f TestDockerfile38 -t thumbor-test-38 .
-
-test-docker-38-run:
-	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:38 make compile_ext redis sequential-unit integration flake
-
-test-docker-38-publish:
-	@docker image tag thumbor-test-38:latest thumbororg/thumbor-test:38
-	@docker push thumbororg/thumbor-test:38
+test-docker-publish: test-docker-39-publish test-docker-310-publish test-docker311-build test-docker312-build
 
 test-docker-39-build:
-	@docker build -f TestDockerfile39 -t thumbor-test-39 .
+	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.9 -t thumbor-test-39 .
 
 test-docker-39-run:
 	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:39 make compile_ext redis sequential-unit integration flake
@@ -198,3 +175,38 @@ test-docker-39-run:
 test-docker-39-publish:
 	@docker image tag thumbor-test-39:latest thumbororg/thumbor-test:39
 	@docker push thumbororg/thumbor-test:39
+
+test-docker-310-build:
+	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.10 -t thumbor-test-310 .
+
+test-docker-310-run:
+	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:310 make compile_ext redis sequential-unit integration flake
+
+test-docker-310-publish:
+	@docker image tag thumbor-test-310:latest thumbororg/thumbor-test:310
+	@docker push thumbororg/thumbor-test:310
+
+test-docker-311-build:
+	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.11 -t thumbor-test-311 .
+
+test-docker-311-run:
+	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:311 make compile_ext redis sequential-unit integration flake
+
+test-docker-311-publish:
+	@docker image tag thumbor-test-311:latest thumbororg/thumbor-test:311
+	@docker push thumbororg/thumbor-test:311
+
+test-docker-312-build:
+	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.12 -t thumbor-test-312 .
+
+test-docker-312-run:
+	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:312 make compile_ext redis sequential-unit integration flake
+
+test-docker-312-publish:
+	@docker image tag thumbor-test-312:latest thumbororg/thumbor-test:312
+	@docker push thumbororg/thumbor-test:312
+
+publish:
+	@python setup.py sdist
+	@twine upload dist/*
+	@rm -rf dist/

@@ -13,7 +13,11 @@ from thumbor.storages import BaseStorage
 
 class Storage(BaseStorage):
     def __init__(
-        self, context, file_storage=None, crypto_storage=None, detector_storage=None,
+        self,
+        context,
+        file_storage=None,
+        crypto_storage=None,
+        detector_storage=None,
     ):
         BaseStorage.__init__(self, context)
 
@@ -30,9 +34,9 @@ class Storage(BaseStorage):
                 item_value=self.context.config.MIXED_STORAGE_FILE_STORAGE,
                 class_name="Storage",
             )
-            self.file_storage = (
-                self.context.modules.file_storage
-            ) = self.context.modules.importer.file_storage(self.context)
+            self.file_storage = self.context.modules.file_storage = (
+                self.context.modules.importer.file_storage(self.context)
+            )
 
     def _init_crypto_storage(self):
         if self.crypto_storage is None:
@@ -41,9 +45,9 @@ class Storage(BaseStorage):
                 item_value=self.context.config.MIXED_STORAGE_CRYPTO_STORAGE,
                 class_name="Storage",
             )
-            self.crypto_storage = (
-                self.context.modules.crypto_storage
-            ) = self.context.modules.importer.crypto_storage(self.context)
+            self.crypto_storage = self.context.modules.crypto_storage = (
+                self.context.modules.importer.crypto_storage(self.context)
+            )
 
     def _init_detector_storage(self):
         if self.detector_storage is None:
@@ -52,9 +56,9 @@ class Storage(BaseStorage):
                 item_value=self.context.config.MIXED_STORAGE_DETECTOR_STORAGE,
                 class_name="Storage",
             )
-            self.detector_storage = (
-                self.context.modules.detector_storage
-            ) = self.context.modules.importer.detector_storage(self.context)
+            self.detector_storage = self.context.modules.detector_storage = (
+                self.context.modules.importer.detector_storage(self.context)
+            )
 
     async def put(self, path, file_bytes):
         self._init_file_storage()
@@ -85,7 +89,7 @@ class Storage(BaseStorage):
 
     async def exists(self, path):
         self._init_file_storage()
-        result = await (self.file_storage.exists(path))
+        result = await self.file_storage.exists(path)
         return result
 
     def resolve_original_photo_path(self, request, filename):
