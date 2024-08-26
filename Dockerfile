@@ -1,7 +1,5 @@
 FROM python:3.8
 
-LABEL maintainer="Mauve Mailorder Software GmbH & Co. KG"
-
 VOLUME /data
 
 # base OS packages
