@@ -179,7 +179,7 @@ async def load(
 
     validate_cert = context.config.HTTP_LOADER_VALIDATE_CERTS
     if validate_cert is not None:
-        validate_cert = (validate_cert.lower().strip() == "true")
+        validate_cert = validate_cert.lower().strip() == "true"
 
     req = tornado.httpclient.HTTPRequest(
         url=url,
