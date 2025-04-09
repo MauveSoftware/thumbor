@@ -24,13 +24,12 @@ RUN apt-get update && \
 
 ADD . /src
 WORKDIR /src
-RUN python3 setup.py sdist && \
-    mv dist/ /tmp/thumbor_dist
+RUN python3 setup.py sdist
 
 RUN python3 -m venv /home/thumbor/venv
 ENV PATH="/home/thumbor/venv/bin:$PATH"
 
-RUN pip3 install --no-cache-dir --find-links=/tmp/thumbor_dist thumbor[all]==${THUMBOR_VERSION}
+RUN pip3 install --no-cache-dir /src/dist/thumbor-${THUMBOR_VERSION}.tar.gz pycurl
 
 FROM python:${PYTHON_VERSION}-slim-bullseye AS runner-image
 
@@ -54,4 +53,4 @@ ENV PYTHONUNBUFFERED=1
 ENV VIRTUAL_ENV=/home/thumbor/venv
 ENV PATH="/home/thumbor/venv/bin:$PATH"
 
-ENTRYPOINT ["thumbor"]
+ENTRYPOINT ["thumbor", "--use-environment=true"]
