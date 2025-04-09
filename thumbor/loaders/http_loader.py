@@ -176,6 +176,11 @@ async def load(
         user_agent = context.config.HTTP_LOADER_DEFAULT_USER_AGENT
 
     url = normalize_url_func(url)
+
+    validate_cert = context.config.HTTP_LOADER_VALIDATE_CERTS
+    if validate_cert is not None:
+        validate_cert = (validate_cert.lower().strip() == "true")
+
     req = tornado.httpclient.HTTPRequest(
         url=url,
         headers=headers,
@@ -191,7 +196,7 @@ async def load(
         ca_certs=encode_fn(context.config.HTTP_LOADER_CA_CERTS),
         client_key=encode_fn(context.config.HTTP_LOADER_CLIENT_KEY),
         client_cert=encode_fn(context.config.HTTP_LOADER_CLIENT_CERT),
-        validate_cert=False, # TODO: check why setting HTTP_LOADER_VALIDATE_CERTS to False does not work
+        validate_cert=validate_cert,
         prepare_curl_callback=prepare_curl_callback,
     )
 
