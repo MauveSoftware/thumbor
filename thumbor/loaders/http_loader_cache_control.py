@@ -11,6 +11,7 @@
 import re
 
 from thumbor.loaders import http_loader
+from functools import partial
 
 
 def _return_contents(response, url, context, req_start=None):
@@ -75,7 +76,7 @@ def _normalize_url(url, context):
 
 
 async def load(context, url):
-    normalize_url_func = lambda u: _normalize_url(u, context)
+    normalize_url_func = partial(_normalize_url, context=context)
     return await http_loader.load(
         context,
         url,
