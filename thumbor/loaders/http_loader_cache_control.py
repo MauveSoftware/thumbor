@@ -21,7 +21,7 @@ def _return_contents(response, url, context, req_start=None):
     cacheTTL = context.request_handler.request.headers.pop("X-Thumbor-Cache-TTL", None)
     if cacheTTL is not None:
         context.request.max_age_shared = int(cacheTTL)
-        
+
     cache_control = result.metadata.get("Cache-Control")
     if cache_control is not None:
         _update_max_age(context, cache_control)
