@@ -20,10 +20,11 @@ def prune_file_if_expired(f: str, file_cache: FileCache):
     if not expire_file.load(f):
         print(f'could not load expire file: {f}')
         return
-
+    
     if expire_file.is_expired():
         print(f'delete {f}')
         file_cache.remove(f.replace(file_cache.EXPIRE_EXT, ""))
+
 
 def prune_expired_links(dir: str, file_cache: FileCache):
     print(f'enter directory {dir}')
@@ -38,6 +39,7 @@ def prune_expired_links(dir: str, file_cache: FileCache):
             prune_file_if_expired(f, file_cache)
             continue
 
+
 def prune_expired_data_files_in_dir(dir: str):
     print(f'enter directory {dir}')
     for name in os.listdir(dir):
@@ -51,6 +53,7 @@ def prune_expired_data_files_in_dir(dir: str):
             print(f'delete {f}')
             os.remove(f)
 
+
 def prune_expired_data_files(dir: str):
     for name in os.listdir(dir):
         f = os.path.join(dir, name)
@@ -60,6 +63,7 @@ def prune_expired_data_files(dir: str):
         files_dir = os.path.join(f, "files")
         if os.path.exists(files_dir):
             prune_expired_data_files_in_dir(files_dir)
+
 
 dir = sys.argv[1]
 if not os.path.exists(dir):
