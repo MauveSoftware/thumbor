@@ -18,21 +18,21 @@ import pytz
 from thumbor.engines import BaseEngine
 from thumbor.result_storages import BaseStorage, ResultStorageResult
 from thumbor.utils import deprecated, logger
-from thumbor.cache.file_cache import FileCache 
+from thumbor.cache.file_cache import FileCache
+
 
 class Storage(BaseStorage):
     PATH_FORMAT_VERSION = "v2"
 
     @property
     def cache(self):
-        return FileCache("RESULT_STORAGE", 
+        return FileCache("RESULT_STORAGE",
                          self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"),
                          0)
 
     @property
     def is_auto_webp(self):
         return self.context.config.AUTO_WEBP and self.context.request.accepts_webp
-
 
     async def put(self, image_bytes):
         if self.context.request.max_age_shared is not None and self.context.request.max_age_shared == 0:
@@ -43,13 +43,12 @@ class Storage(BaseStorage):
 
         symlink_abspath = self.normalize_path(self.context.request.url)
         try:
-            self.cache.put(symlink_abspath, 
-                           image_bytes, 
+            self.cache.put(symlink_abspath,
+                           image_bytes,
                            self.context.request.max_age,
                            self.context.request.max_age_shared)
         except IOError as e:
             logger.error("[RESULT_STORAGE] error persisting item to result cache: %s", e.strerror)
-
 
     async def get(self):
         if self.context.request.bypass_cache:
@@ -77,7 +76,6 @@ class Storage(BaseStorage):
             },
         )
 
-
     def normalize_path(self, path):
         digest = hashlib.sha1(unquote(path).encode("utf-8")).hexdigest()
 
@@ -88,7 +86,6 @@ class Storage(BaseStorage):
             digest[2:4],
             digest[4:],
         )
-
 
     @deprecated("Use result's last_modified instead")
     def last_updated(self):

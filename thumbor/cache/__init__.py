@@ -6,5 +6,4 @@
 
 # Licensed under the MIT license:
 # http://www.opensource.org/licenses/mit-license
-# Copyright (c) 2023 Mauve Mailorder Software 
-
+# Copyright (c) 2023 Mauve Mailorder Software

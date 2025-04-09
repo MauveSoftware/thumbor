@@ -23,10 +23,9 @@ class Storage(storages.BaseStorage):
 
     @property
     def cache(self):
-        return FileCache("STORAGE", 
-                         self.context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"), 
+        return FileCache("STORAGE",
+                         self.context.config.FILE_STORAGE_ROOT_PATH.rstrip("/"),
                          self.context.config.get("STORAGE_EXPIRATION_SECONDS", None))
-
 
     async def put(self, path, file_bytes):
         if self.context.request.max_age_shared is not None and self.context.request.max_age_shared == 0:
@@ -37,16 +36,15 @@ class Storage(storages.BaseStorage):
 
         file_abspath = self.path_on_filesystem(path)
         try:
-            self.cache.put(file_abspath, 
-                           file_bytes, 
-                           self.context.request.max_age, 
+            self.cache.put(file_abspath,
+                           file_bytes,
+                           self.context.request.max_age,
                            self.context.request.max_age_shared)
         except IOError as e:
             logger.error("[STORAGE] error persisting cache item: %s", e.strerror)
             return
 
         return path
-
 
     async def get(self, path):
         if self.context.request.bypass_cache:
@@ -60,7 +58,6 @@ class Storage(storages.BaseStorage):
 
         return res.data
 
-
     def path_on_filesystem(self, hash_data):
         digest = hashlib.sha1(hash_data.encode("utf-8")).hexdigest()
         return "%s/%s/%s" % (
@@ -69,7 +66,6 @@ class Storage(storages.BaseStorage):
             digest[2:],
         )
 
-
     async def exists(self, path, path_on_filesystem=None):  # pylint: disable=arguments-differ
         if path_on_filesystem is None:
             path_on_filesystem = self.path_on_filesystem(path)
@@ -77,11 +73,9 @@ class Storage(storages.BaseStorage):
         found, _, _ = self.cache.exists(path_on_filesystem)
         return found
 
-
     async def remove(self, path):
         n_path = self.path_on_filesystem(path)
         self.cache.remove(n_path)
-
 
     async def put_crypto(self, path):
         if not self.context.config.STORES_CRYPTO_KEY_FOR_EACH_IMAGE:
@@ -112,7 +106,6 @@ class Storage(storages.BaseStorage):
 
         return file_abspath
 
-
     async def put_detector_data(self, path, data):
         file_abspath = self.path_on_filesystem(path)
 
@@ -128,7 +121,6 @@ class Storage(storages.BaseStorage):
         move(temp_abspath, path)
 
         return file_abspath
-
 
     async def get_detector_data(self, path):
         file_abspath = self.path_on_filesystem(path)

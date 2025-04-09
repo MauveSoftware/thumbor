@@ -11,20 +11,18 @@
 import os.path
 from datetime import datetime
 
+
 class ExpireFile:
     def __init__(self, default_expiration: int = 0):
         self.max_age = default_expiration
         self.max_age_shared = None
         self.change_date = datetime.now()
 
-
     def set_max_age(self, val: int):
         self.max_age = val
 
-
     def set_max_age_shared(self, val: int):
         self.max_age_shared = val
-
 
     def load(self, path: str):
         if not os.path.exists(path):
@@ -43,11 +41,9 @@ class ExpireFile:
 
         return True
 
-
-    def save(self, path: str): 
+    def save(self, path: str):
         with open(path, "wb") as _file:
             self.__write(_file)
-
 
     def __write(self, _file):
         max_age = self.max_age
@@ -59,9 +55,8 @@ class ExpireFile:
         if self.max_age_shared is not None:
             _file.write(str.encode("," + str(self.max_age_shared)))
 
-
     def is_expired(self):
-        timediff = datetime.now() - self.change_date;
+        timediff = datetime.now() - self.change_date
 
         if self.max_age_shared is not None:
             return timediff.total_seconds() > self.max_age_shared

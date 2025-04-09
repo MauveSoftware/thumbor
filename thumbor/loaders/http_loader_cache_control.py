@@ -5,12 +5,13 @@
 # https://github.com/thumbor/thumbor/wiki
 
 # Licensed under the MIT license:
-#!/usr/bin/python
-# -*- coding: utf-8 -*-
+# http://www.opensource.org/licenses/mit-license
+# Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
 import re
 
 from thumbor.loaders import http_loader
+
 
 def _return_contents(response, url, context, req_start=None):
     result = http_loader.return_contents(response, url, context, req_start)
@@ -30,6 +31,7 @@ def _return_contents(response, url, context, req_start=None):
 
     return result
 
+
 def _update_max_age(context, cache_control):
     match = re.search("s-maxage\\s*=\\s*(\\d+)", cache_control)
     if match:
@@ -43,6 +45,7 @@ def _update_max_age(context, cache_control):
         return
 
     context.request.max_age = 0
+
 
 def _normalize_url(url, context):
     url = http_loader.quote_url(url)
@@ -63,6 +66,7 @@ def _normalize_url(url, context):
 
     return "https://" + backend_address + url[idx:]
 
+
 async def load(context, url):
     normalize_url_func = lambda u: _normalize_url(u, context)
-    return await http_loader.load(context, url, return_contents_fn=_return_contents,normalize_url_func=normalize_url_func)
+    return await http_loader.load(context, url, return_contents_fn=_return_contents, normalize_url_func=normalize_url_func)
