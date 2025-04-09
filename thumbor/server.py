@@ -16,7 +16,6 @@ import warnings
 import socket
 from os.path import dirname, expanduser
 from shutil import which
-from socket import socket
 
 import tornado.ioloop
 from PIL import Image
