@@ -16,7 +16,13 @@ from thumbor.utils import logger
 
 
 class FileCacheResult:
-    def __init__(self, found: bool, data: bytes = bytes(), max_age=None, max_age_shared=None):
+    def __init__(
+        self,
+        found: bool,
+        data: bytes = bytes(),
+        max_age=None,
+        max_age_shared=None,
+    ):
         self.found = found
         self.data = data
         self.max_age = max_age
@@ -53,26 +59,28 @@ class FileCache:
             return FileCacheResult(False)
 
         with open(path, "rb") as source_file:
-            return FileCacheResult(True, source_file.read(), max_age, max_age_shared)
+            return FileCacheResult(
+                True, source_file.read(), max_age, max_age_shared
+            )
 
     def exists(self, path):
         expire_file = ExpireFile(self.default_max_age)
         if not expire_file.load(path + self.EXPIRE_EXT):
-            logger.debug(
-                f"[{self.name}] no expire file found for {path}"
-            )
+            logger.debug(f"[{self.name}] no expire file found for {path}")
             return False, None, None
 
         if expire_file.is_expired():
-            logger.debug(
-                f"[{self.name}] cache for {path} is expired"
-            )
+            logger.debug(f"[{self.name}] cache for {path} is expired")
             return False, None, None
 
         logger.debug(
             f"[{self.name}] found {path} in cache ({expire_file.max_age}, {expire_file.max_age_shared})"
         )
-        return os.path.exists(path), expire_file.max_age, expire_file.max_age_shared
+        return (
+            os.path.exists(path),
+            expire_file.max_age,
+            expire_file.max_age_shared,
+        )
 
     def write_expire_file(self, path, max_age, max_age_shared):
         expire_file = ExpireFile(0)
@@ -84,9 +92,7 @@ class FileCache:
         expire_file.save(path)
 
     def ensure_data_file_exists(self, path, data):
-        logger.debug(
-            f"[{self.name}] write data file to {path}"
-        )
+        logger.debug(f"[{self.name}] write data file to {path}")
         if os.path.exists(path):
             return
 
@@ -121,9 +127,7 @@ class FileCache:
             os.remove(expire_file_path)
 
     def remove(self, path):
-        logger.debug(
-            f"[{self.name}] delete cache for path {path}"
-        )
+        logger.debug(f"[{self.name}] delete cache for path {path}")
         if os.path.exists(path):
             os.remove(path)
 

@@ -13,6 +13,7 @@ from thumbor.metrics import BaseMetrics
 from socket import gaierror
 from thumbor.utils import logger
 
+
 class Metrics(BaseMetrics):
     @classmethod
     def new_client(cls, config):
@@ -47,4 +48,3 @@ class Metrics(BaseMetrics):
             return
 
         cl.timing(metricname, value)
-

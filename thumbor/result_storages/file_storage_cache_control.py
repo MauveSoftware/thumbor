@@ -26,33 +26,54 @@ class Storage(BaseStorage):
 
     @property
     def cache(self):
-        return FileCache("RESULT_STORAGE",
-                         self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"),
-                         0)
+        return FileCache(
+            "RESULT_STORAGE",
+            self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip(
+                "/"
+            ),
+            0,
+        )
 
     @property
     def is_auto_webp(self):
-        return self.context.config.AUTO_WEBP and self.context.request.accepts_webp
+        return (
+            self.context.config.AUTO_WEBP and self.context.request.accepts_webp
+        )
 
     async def put(self, image_bytes):
-        if self.context.request.max_age_shared is not None and self.context.request.max_age_shared == 0:
+        if (
+            self.context.request.max_age_shared is not None
+            and self.context.request.max_age_shared == 0
+        ):
             return
 
-        if self.context.request.max_age_shared is None and self.context.request.max_age is not None and self.context.request.max_age == 0:
+        if (
+            self.context.request.max_age_shared is None
+            and self.context.request.max_age is not None
+            and self.context.request.max_age == 0
+        ):
             return
 
         symlink_abspath = self.normalize_path(self.context.request.url)
         try:
-            self.cache.put(symlink_abspath,
-                           image_bytes,
-                           self.context.request.max_age,
-                           self.context.request.max_age_shared)
+            self.cache.put(
+                symlink_abspath,
+                image_bytes,
+                self.context.request.max_age,
+                self.context.request.max_age_shared,
+            )
         except IOError as e:
-            logger.error("[RESULT_STORAGE] error persisting item to result cache: %s", e.strerror)
+            logger.error(
+                "[RESULT_STORAGE] error persisting item to result cache: %s",
+                e.strerror,
+            )
 
     async def get(self):
         if self.context.request.bypass_cache:
-            logger.info("[RESULT_STORAGE] bypassing cache for %s", self.context.request.url)
+            logger.info(
+                "[RESULT_STORAGE] bypassing cache for %s",
+                self.context.request.url,
+            )
             return None
 
         path = self.context.request.url
@@ -68,9 +89,9 @@ class Storage(BaseStorage):
         return ResultStorageResult(
             buffer=res.data,
             metadata={
-                "LastModified": datetime.fromtimestamp(getmtime(file_abspath)).replace(
-                    tzinfo=pytz.utc
-                ),
+                "LastModified": datetime.fromtimestamp(
+                    getmtime(file_abspath)
+                ).replace(tzinfo=pytz.utc),
                 "ContentLength": len(res.data),
                 "ContentType": BaseEngine.get_mimetype(res.data),
             },
@@ -80,7 +101,9 @@ class Storage(BaseStorage):
         digest = hashlib.sha1(unquote(path).encode("utf-8")).hexdigest()
 
         return "%s/%s/%s/%s/%s" % (
-            self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip("/"),
+            self.context.config.RESULT_STORAGE_FILE_STORAGE_ROOT_PATH.rstrip(
+                "/"
+            ),
             "auto_webp" if self.is_auto_webp else "default",
             digest[:2],
             digest[2:4],
@@ -93,7 +116,12 @@ class Storage(BaseStorage):
         file_abspath = self.normalize_path(path)
 
         if not self.cache.exists(file_abspath):
-            logger.debug("[RESULT_STORAGE] image not found or expired at %s", file_abspath)
+            logger.debug(
+                "[RESULT_STORAGE] image not found or expired at %s",
+                file_abspath,
+            )
             return True
 
-        return datetime.fromtimestamp(getmtime(file_abspath)).replace(tzinfo=pytz.utc)
+        return datetime.fromtimestamp(getmtime(file_abspath)).replace(
+            tzinfo=pytz.utc
+        )

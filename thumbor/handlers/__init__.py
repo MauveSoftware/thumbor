@@ -718,7 +718,9 @@ class BaseHandler(tornado.web.RequestHandler):
             cache_control = "max-age=" + str(max_age)
 
             if self.context.request.max_age_shared is not None:
-                cache_control += ",s-maxage=" + str(self.context.request.max_age_shared)
+                cache_control += ",s-maxage=" + str(
+                    self.context.request.max_age_shared
+                )
 
             cache_control += ",public"
 
@@ -738,7 +740,9 @@ class BaseHandler(tornado.web.RequestHandler):
 
         self.set_header("Server", f"Thumbor/{__version__}")
         self.set_header("Content-Type", content_type)
-        self.set_header("X-Thumbor-Cache-Status", str(self.context.request.cache_status))
+        self.set_header(
+            "X-Thumbor-Cache-Status", str(self.context.request.cache_status)
+        )
 
         if isinstance(results, ResultStorageResult):
             buffer = results.buffer

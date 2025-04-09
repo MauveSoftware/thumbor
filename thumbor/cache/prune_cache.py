@@ -18,16 +18,16 @@ from thumbor.cache.file_cache import FileCache
 def prune_file_if_expired(f: str, file_cache: FileCache):
     expire_file = ExpireFile()
     if not expire_file.load(f):
-        print(f'could not load expire file: {f}')
+        print(f"could not load expire file: {f}")
         return
 
     if expire_file.is_expired():
-        print(f'delete {f}')
+        print(f"delete {f}")
         file_cache.remove(f.replace(file_cache.EXPIRE_EXT, ""))
 
 
 def prune_expired_links(dir: str, file_cache: FileCache):
-    print(f'enter directory {dir}')
+    print(f"enter directory {dir}")
     for name in os.listdir(dir):
         f = os.path.join(dir, name)
 
@@ -41,7 +41,7 @@ def prune_expired_links(dir: str, file_cache: FileCache):
 
 
 def prune_expired_data_files_in_dir(dir: str):
-    print(f'enter directory {dir}')
+    print(f"enter directory {dir}")
     for name in os.listdir(dir):
         f = os.path.join(dir, name)
         if os.path.isdir(f):
@@ -50,7 +50,7 @@ def prune_expired_data_files_in_dir(dir: str):
 
         stat = os.stat(f)
         if stat.st_nlink == 1:
-            print(f'delete {f}')
+            print(f"delete {f}")
             os.remove(f)
 
 
@@ -67,12 +67,12 @@ def prune_expired_data_files(dir: str):
 
 dir = sys.argv[1]
 if not os.path.exists(dir):
-    print(f'path {dir} does not exist')
+    print(f"path {dir} does not exist")
     os._exit(1)
 
 file_cache = FileCache("", dir, 0)
-print('Prune expired links')
+print("Prune expired links")
 prune_expired_links(dir, file_cache)
 
-print('Prune data files not linked any more')
+print("Prune data files not linked any more")
 prune_expired_data_files(dir)
