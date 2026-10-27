@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -111,7 +110,8 @@ class Storage(BaseStorage):
             ]
         )
 
-        normalized_path = join(*path_segments).replace("http://", "")
+        insecure_scheme = "http://"  # NOSONAR
+        normalized_path = join(*path_segments).replace(insecure_scheme, "")
         return normalized_path
 
     def partition(self, path_raw):

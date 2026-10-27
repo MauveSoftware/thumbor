@@ -65,9 +65,28 @@ Config.define(
     "Imaging",
 )
 Config.define(
+    "ALLOWED_SIZES",
+    [],
+    (
+        "Sizes that image URLs may request, as 'WIDTHxHEIGHT' strings such "
+        "as '400x200'. Use 0 for an omitted or proportional dimension and "
+        "'orig' for the original one. Any other size is rejected with a 400. "
+        "Use an empty list to allow all sizes"
+    ),
+    "Imaging",
+)
+Config.define(
     "ALLOWED_SOURCES",
     [],
-    "Allowed domains for the http loader to download. These are regular expressions.",
+    (
+        "Allowed sources for the HTTP loader. Each entry is matched against the "
+        "request hostname. Plain strings are matched literally (dots are NOT "
+        "wildcards). Regex-like strings are accepted only for backward "
+        "compatibility and log a warning; use compiled patterns for new "
+        "regular expressions: "
+        "re.compile(r'.*\\.mydomain\\.com'). Example: "
+        "ALLOWED_SOURCES = ['images.mydomain.com', re.compile(r'cdn[0-9]+\\.example\\.com')]"
+    ),
     "Imaging",
 )
 Config.define(
@@ -228,6 +247,15 @@ Config.define(
     "Imaging",
 )
 Config.define(
+    "AUTO_IMAGE_FORMAT_PREFERENCE",
+    [],
+    "Ordered list of preferred formats to be used automatically. "
+    "Valid formats are webp, avif, jpg, heif and png. A list containing at "
+    "least one valid format overrides all individual AUTO_* format settings, "
+    "but AUTO_PNG_TO_JPG remains an independent fallback.",
+    "Imaging",
+)
+Config.define(
     "SVG_DPI",
     150,
     "Specify the ratio between 1in and 1px for SVG images. This is only used when "
@@ -294,6 +322,14 @@ Config.define(
     "ALLOW_ANIMATED_GIFS",
     True,
     "Indicates whether thumbor should enable the EXPERIMENTAL support for animated gifs.",
+    "Imaging",
+)
+
+Config.define(
+    "ALLOW_ANIMATED_WEBP",
+    True,
+    "Preserves animated WebP inputs when using the Pillow engine. "
+    "Disable to process only the first frame.",
     "Imaging",
 )
 

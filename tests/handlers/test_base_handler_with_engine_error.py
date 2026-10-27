@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -11,7 +10,6 @@
 from unittest.mock import patch
 
 import pytest
-from preggy import expect
 from tornado.testing import gen_test
 
 from tests.handlers.test_base_handler import BaseImagingTestCase
@@ -44,7 +42,7 @@ class EngineLoadException(BaseImagingTestCase):
     @gen_test
     async def test_should_error_on_engine_load_exception(self, _):
         response = await self.async_fetch("/unsafe/image.jpg")
-        expect(response.code).to_equal(500)
+        assert response.code == 500
 
     @pytest.mark.skip(
         reason="I disagree with this test. If the engine fails we "
@@ -53,7 +51,7 @@ class EngineLoadException(BaseImagingTestCase):
     @gen_test
     async def test_should_release_ioloop_on_error_on_engine_exception(self):
         response = await self.async_fetch("/unsafe/fit-in/134x134/940x2.png")
-        expect(response.code).to_equal(200)
+        assert response.code == 200
 
     @pytest.mark.skip(
         reason="I disagree with this test. If the engine fails we "
@@ -66,7 +64,7 @@ class EngineLoadException(BaseImagingTestCase):
         response = await self.async_fetch(
             "/unsafe/fit-in/134x134/filters:equalize()/940x2.png"
         )
-        expect(response.code).to_equal(200)
+        assert response.code == 200
 
     @patch.object(Engine, "read", side_effect=Exception)
     @gen_test
@@ -74,4 +72,4 @@ class EngineLoadException(BaseImagingTestCase):
         self, _
     ):  # NOQA
         response = await self.async_fetch("/unsafe/fit-in/134x134/940x2.png")
-        expect(response.code).to_equal(500)
+        assert response.code == 500

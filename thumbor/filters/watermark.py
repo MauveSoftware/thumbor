@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -22,6 +21,8 @@ from thumbor.utils import logger
 
 
 class Filter(BaseFilter):
+    watermark_buffer = None
+
     @staticmethod
     def detect_and_get_ratio_position(pos, length):
         match = re.match("^(-?)([0-9]+)p$", pos)
@@ -52,7 +53,7 @@ class Filter(BaseFilter):
             wm_height = round(wm_max_height)
             wm_width = round(watermark_sz[0] * wm_max_height / watermark_sz[1])
 
-        return (wm_width, wm_height)
+        return (max(wm_width, 1), max(wm_height, 1))
 
     # TODO: refactor this
     def on_image_ready(  # pylint: disable=too-many-statements,too-many-branches,too-many-locals
@@ -161,8 +162,8 @@ class Filter(BaseFilter):
         r"(?:-?\d+p?)|center|repeat",
         r"(?:-?\d+p?)|center|repeat",
         BaseFilter.PositiveNumber,
-        r"(?:-?\d+)|none",
-        r"(?:-?\d+)|none",
+        r"(?:\d+(?:\.\d*)?|\.\d+)|none",
+        r"(?:\d+(?:\.\d*)?|\.\d+)|none",
     )
     async def watermark(
         self, url, x, y, alpha, w_ratio=False, h_ratio=False
@@ -183,8 +184,11 @@ class Filter(BaseFilter):
         self.storage = self.context.modules.storage
 
         try:
-            buffer = await self.storage.get(self.url)
+            buffer = self.watermark_buffer
+            if buffer is None:
+                buffer = await self.storage.get(self.url)
             if buffer is not None:
+                self.watermark_buffer = buffer
                 return self.on_image_ready(buffer)
 
             if not self.validate(self.url):
@@ -209,6 +213,7 @@ class Filter(BaseFilter):
 
             await self.storage.put(self.url, buffer)
             await self.storage.put_crypto(self.url)
+            self.watermark_buffer = buffer
             self.on_image_ready(buffer)
 
         except Exception as error:

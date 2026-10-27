@@ -1,7 +1,12 @@
 name: build
 on:
   push:
+    branches:
+      - master
   pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - master
 
 permissions:
   checks: write # to create new checks (coverallsapp/github-action)
@@ -17,27 +22,44 @@ jobs:
       fail-fast: false
       matrix:
         image-tag:
-          - "3.9"
-          - "3.10"
           - "3.11"
           - "3.12"
+          - "3.13"
+          - "3.14"
+          - "3.15"
     steps:
-      - uses: satackey/action-docker-layer-caching@v0.0.11
+      - uses: satackey/action-docker-layer-caching@46d2c640b1d8ef50d185452ad6fb324e6bd1d052 # v0.0.11
         continue-on-error: true
         with:
           key: thumbor-docker-${{ matrix.image-tag }}-{hash}
           restore-keys: |
             thumbor-docker-${{ matrix.image-tag }}-
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - name: Check every uv sync/run uses --locked
+        if: matrix.image-tag == '3.11'
+        shell: bash
+        run: |
+          git grep -nE \
+            '(uv|\$\(UV\)|run-uv)[[:space:]]+(sync|run)([[:space:]]|$)' \
+            -- .github/workflows Makefile .pre-commit-config.yaml scripts |
+            awk '
+              !/(uv|\$\(UV\)|run-uv)[[:space:]]+(sync|run)[[:space:]]+--locked([[:space:]]|$)/ {
+                print "Missing --locked: " $0
+                failed = 1
+              }
+              END { exit failed }
+            '
       - name: Build test image
         run: docker build -t test_image -f TestDockerfile --build-arg PYTHON_VERSION=${{ matrix.image-tag }} .
       - name: Start test container
         run: |
           docker run -dt --name thumbor_test -v $(pwd):/app test_image
+      - name: Check uv lockfile
+        run: docker exec thumbor_test uv lock --check
       - name: Fire up Redis
         run: docker exec thumbor_test make redis
       - name: Setup
-        run: docker exec thumbor_test make setup
+        run: docker exec thumbor_test make setup-ci
       - name: Compile Extensions
         run: docker exec thumbor_test make compile_ext
       - name: Run Unit Tests
@@ -47,9 +69,9 @@ jobs:
       - name: Lint
         run: docker exec thumbor_test make pylint
       - name: Generate lcov
-        run: docker exec thumbor_test coverage lcov
+        run: docker exec thumbor_test make lcov
       - name: Coveralls
-        uses: coverallsapp/github-action@v2.3.6
+        uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # 2.3.8
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path-to-lcov: coverage.lcov
@@ -60,7 +82,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Coveralls Finished
-        uses: coverallsapp/github-action@v2.3.6
+        uses: coverallsapp/github-action@8d6379e14d29928660c4ba802d8e85393440b329 # 2.3.8
         with:
           github-token: ${{ secrets.github_token }}
           parallel-finished: true

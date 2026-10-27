@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -7,9 +6,11 @@
 # Licensed under the MIT license:
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
+import importlib.util
 from unittest import TestCase, mock
 
-from preggy import expect
+import pytest
+from tornado import netutil
 
 import thumbor.server
 from tests.fixtures.custom_error_handler import (
@@ -26,24 +27,92 @@ from thumbor.server import (
     get_importer,
     main,
     run_server,
+    validate_allowed_sizes,
     validate_config,
 )
 
 
+@pytest.fixture(name="server_without_unix_sockets")
+def fixture_server_without_unix_sockets(monkeypatch):
+    monkeypatch.delattr(netutil, "bind_unix_socket", raising=False)
+    spec = importlib.util.spec_from_file_location(
+        "server_without_unix_sockets", thumbor.server.__file__
+    )
+    server_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(server_module)
+    return server_module
+
+
+def test_can_start_tcp_without_unix_sockets(server_without_unix_sockets):
+    context = mock.Mock(
+        server=mock.Mock(fd=None, port=1234, ip="127.0.0.1", processes=1)
+    )
+    with mock.patch.object(server_without_unix_sockets, "HTTPServer") as http:
+        server_without_unix_sockets.run_server(mock.Mock(), context)
+
+    http.return_value.bind.assert_called_once_with(1234, "127.0.0.1")
+    http.return_value.start.assert_called_once_with(1)
+    http.return_value.add_socket.assert_not_called()
+
+
+@pytest.mark.parametrize("non_blocking", [False, True])
+def test_can_use_fd_without_unix_sockets(
+    server_without_unix_sockets, non_blocking
+):
+    context = mock.Mock(
+        server=mock.Mock(fd="11", processes=1),
+        config=Config(NON_BLOCKING_SOCKETS=non_blocking),
+    )
+    with (
+        mock.patch.object(server_without_unix_sockets, "HTTPServer") as http,
+        mock.patch.object(server_without_unix_sockets, "socket") as socket,
+    ):
+        server_without_unix_sockets.run_server(mock.Mock(), context)
+
+    socket.assert_called_once_with(fileno=11)
+    if non_blocking:
+        socket.return_value.setblocking.assert_called_once_with(False)
+    else:
+        socket.return_value.setblocking.assert_not_called()
+    http.return_value.add_socket.assert_called_once_with(socket.return_value)
+    http.return_value.start.assert_called_once_with(1)
+    http.return_value.bind.assert_not_called()
+
+
+def test_rejects_unavailable_unix_socket(server_without_unix_sockets):
+    application = mock.Mock()
+    context = mock.Mock(
+        server=mock.Mock(fd="/tmp/thumbor.sock"), config=Config()
+    )
+    with mock.patch.object(server_without_unix_sockets, "HTTPServer") as http:
+        with pytest.raises(
+            RuntimeError,
+            match=(
+                "Unix domain sockets are not supported.*"
+                "numeric file descriptor to --fd"
+            ),
+        ):
+            server_without_unix_sockets.run_server(application, context)
+
+    http.return_value.bind.assert_not_called()
+    http.return_value.add_socket.assert_not_called()
+    http.return_value.start.assert_not_called()
+
+
 class ServerTestCase(TestCase):
     def test_can_get_value_as_integer(self):
-        expect(get_as_integer("1")).to_equal(1)
-        expect(get_as_integer("a")).to_be_null()
-        expect(get_as_integer("")).to_be_null()
-        expect(get_as_integer(None)).to_be_null()
+        assert get_as_integer("1") == 1
+        assert get_as_integer("a") is None
+        assert get_as_integer("") is None
+        assert get_as_integer(None) is None
 
     def test_can_get_config_from_path(self):
         config = get_config("./tests/fixtures/thumbor_config_server_test.conf")
 
         with mock.patch.dict("os.environ", {"ENGINE": "test"}):
-            expect(config).not_to_be_null()
-            expect(config.ALLOWED_SOURCES).to_be_like(["mydomain.com"])
-            expect(config.ENGINE).to_be_like("thumbor.engines.pil")
+            assert config is not None
+            assert config.ALLOWED_SOURCES == ["mydomain.com"]
+            assert config.ENGINE == "thumbor.engines.pil"
 
     def test_can_get_config_with_env_enabled(self):
         config = get_config(
@@ -51,9 +120,9 @@ class ServerTestCase(TestCase):
         )
 
         with mock.patch.dict("os.environ", {"ENGINE": "test"}):
-            expect(config).not_to_be_null()
-            expect(config.ALLOWED_SOURCES).to_be_like(["mydomain.com"])
-            expect(config.ENGINE).to_be_like("test")
+            assert config is not None
+            assert config.ALLOWED_SOURCES == ["mydomain.com"]
+            assert config.ENGINE == "test"
 
     @mock.patch("logging.basicConfig")
     def test_can_configure_log_from_config(self, basic_config_mock):
@@ -83,8 +152,8 @@ class ServerTestCase(TestCase):
         conf = Config()
         importer = get_importer(conf)
 
-        expect(importer).not_to_be_null()
-        expect(importer.filters).not_to_be_empty()
+        assert importer is not None
+        assert importer.filters
 
     def test_can_import_with_custom_error_handler_class(self):
         conf = Config(
@@ -93,21 +162,19 @@ class ServerTestCase(TestCase):
         )
         importer = get_importer(conf)
 
-        expect(importer).not_to_be_null()
-        expect(importer.error_handler_class).not_to_be_null()
-        expect(importer.error_handler_class).to_be_instance_of(
-            CustomErrorHandler
-        )
+        assert importer is not None
+        assert importer.error_handler_class is not None
+        assert importer.error_handler_class is CustomErrorHandler
 
     def test_validate_config_security_key(self):
         server_parameters = mock.Mock(security_key=None)
         conf = Config(SECURITY_KEY=None)
 
-        with expect.error_to_happen(
-            RuntimeError,
-            message="No security key was found for this instance of thumbor. "
-            "Please provide one using the conf file or a security key file.",
-        ):
+        msg = (
+            "No security key was found for this instance of thumbor. "
+            "Please provide one using the conf file or a security key file."
+        )
+        with pytest.raises(RuntimeError, match=msg):
             validate_config(conf, server_parameters)
 
     def test_validate_config_security_key_from_config(self):
@@ -115,7 +182,30 @@ class ServerTestCase(TestCase):
         conf = Config(SECURITY_KEY="something")
 
         validate_config(conf, server_parameters)
-        expect(server_parameters.security_key).to_equal("something")
+        assert server_parameters.security_key == "something"
+
+    @mock.patch.object(thumbor.server, "warn_legacy_allowed_sources")
+    def test_validate_config_warns_about_legacy_allowed_sources(
+        self, warning_mock
+    ):
+        server_parameters = mock.Mock(security_key=None)
+        conf = Config(
+            SECURITY_KEY="something",
+            ALLOWED_SOURCES=[r".+\.glbimg\.com"],
+        )
+
+        validate_config(conf, server_parameters)
+
+        warning_mock.assert_called_once_with(conf.ALLOWED_SOURCES)
+
+    @mock.patch.object(thumbor.server, "validate_allowed_sizes")
+    def test_validate_config_validates_allowed_sizes(self, validation_mock):
+        server_parameters = mock.Mock(security_key=None)
+        conf = Config(SECURITY_KEY="something", ALLOWED_SIZES=["400x200"])
+
+        validate_config(conf, server_parameters)
+
+        validation_mock.assert_called_once_with(["400x200"])
 
     @mock.patch.object(thumbor.server, "which")
     def test_validate_gifsicle_path(self, which_mock):
@@ -125,7 +215,7 @@ class ServerTestCase(TestCase):
         which_mock.return_value = "/usr/bin/gifsicle"
 
         validate_config(conf, server_parameters)
-        expect(server_parameters.gifsicle_path).to_equal("/usr/bin/gifsicle")
+        assert server_parameters.gifsicle_path == "/usr/bin/gifsicle"
 
     @mock.patch.object(thumbor.server, "which")
     def test_validate_null_gifsicle_path(self, which_mock):
@@ -134,11 +224,11 @@ class ServerTestCase(TestCase):
 
         which_mock.return_value = None
 
-        with expect.error_to_happen(
-            RuntimeError,
-            message="If using USE_GIFSICLE_ENGINE configuration to True, "
-            "the `gifsicle` binary must be in the PATH and must be an executable.",
-        ):
+        msg = (
+            "If using USE_GIFSICLE_ENGINE configuration to True, "
+            "the `gifsicle` binary must be in the PATH and must be an executable."
+        )
+        with pytest.raises(RuntimeError, match=msg):
             validate_config(conf, server_parameters)
 
     def test_get_context(self):
@@ -148,8 +238,7 @@ class ServerTestCase(TestCase):
         conf = Config(SECURITY_KEY="test")
         importer = get_importer(conf)
         context = get_context(server_parameters, conf, importer)
-
-        expect(context).not_to_be_null()
+        assert context.server == server_parameters
 
     def test_get_application(self):
         server_parameters = mock.Mock(
@@ -160,8 +249,7 @@ class ServerTestCase(TestCase):
         context = get_context(server_parameters, conf, importer)
         app = get_application(context)
 
-        expect(app).not_to_be_null()
-        expect(app).to_be_instance_of(ThumborServiceApp)
+        assert isinstance(app, ThumborServiceApp)
 
     @mock.patch.object(thumbor.server, "HTTPServer")
     def test_can_run_server_with_default_params(self, server_mock):
@@ -236,7 +324,7 @@ class ServerTestCase(TestCase):
         server_instance_mock.start.assert_called_with(1)
 
     @mock.patch.object(thumbor.server, "HTTPServer")
-    @mock.patch.object(thumbor.server, "bind_unix_socket")
+    @mock.patch.object(netutil, "bind_unix_socket", create=True)
     def test_can_run_server_with_unix_socket(
         self, bind_unix_socket, server_mock
     ):
@@ -302,3 +390,51 @@ class ServerTestCase(TestCase):
 
     def cleanup(self):
         ServerTestCase.cleanup_called = True
+
+
+@pytest.mark.parametrize(
+    "allowed_sizes",
+    [
+        [],
+        (),
+        ["400x200", "0x0", "400x0", "0x200"],
+        ("origx200", "400xorig", "origxorig"),
+        {"400x200", "1200x0"},
+    ],
+)
+def test_validate_allowed_sizes_accepts_valid_sizes(allowed_sizes):
+    validate_allowed_sizes(allowed_sizes)
+
+
+@pytest.mark.parametrize(
+    "allowed_sizes",
+    ["400x200", "", 400, 0, None, {"400x200": 1}, {}],
+)
+def test_validate_allowed_sizes_requires_a_list(allowed_sizes):
+    with pytest.raises(RuntimeError, match="must be a list of sizes"):
+        validate_allowed_sizes(allowed_sizes)
+
+
+@pytest.mark.parametrize(
+    "size",
+    [
+        "400",
+        "400x",
+        "x200",
+        "0400x200",
+        "400x00",
+        "400X200",
+        " 400x200",
+        "400x200 ",
+        "-400x200",
+        "400.5x200",
+        "ORIGx200",
+        "4\u0660\u0660x200",
+        "400x2\uff10\uff10",
+        400,
+        (400, 200),
+    ],
+)
+def test_validate_allowed_sizes_rejects_invalid_entries(size):
+    with pytest.raises(RuntimeError, match="Invalid ALLOWED_SIZES entry"):
+        validate_allowed_sizes(["400x200", size])

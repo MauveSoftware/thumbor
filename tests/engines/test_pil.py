@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -15,19 +14,18 @@ from os.path import abspath, dirname, join
 from unittest import TestCase, mock
 
 import piexif
-from PIL import Image
-from preggy import expect
 import pytest
+from PIL import Image, ImageChops, ImageDraw, ImageSequence
 
 from tests.base import (
+    AVIF_AVAILABLE,
     skip_unless_avif,
     skip_unless_avif_encoder,
     skip_unless_heif,
 )
 from thumbor.config import Config
 from thumbor.context import Context
-from thumbor.engines.pil import Engine, KEEP_EXIF_COPYRIGHT_TAGS
-
+from thumbor.engines.pil import KEEP_EXIF_COPYRIGHT_TAGS, Engine
 
 FIXTURES_PATH = abspath(join(dirname(__file__), "../fixtures/"))
 STORAGE_PATH = join(FIXTURES_PATH, "images")
@@ -51,31 +49,31 @@ class PilEngineTestCase(TestCase):
 
     def test_create_engine(self):
         engine = Engine(self.context)
-        expect(engine).to_be_instance_of(Engine)
+        assert isinstance(engine, Engine)
 
     def test_load_image(self):
         engine = Engine(self.context)
         with open(join(STORAGE_PATH, "image.jpg"), "rb") as image_file:
             buffer = image_file.read()
         image = engine.create_image(buffer)
-        expect(image.format).to_equal("JPEG")
-        expect(engine.subsampling).to_equal(0)
+        assert image.format == "JPEG"
+        assert engine.subsampling == 0
 
     def test_load_jp2_image(self):
         engine = Engine(self.context)
         with open(join(STORAGE_PATH, "image.jp2"), "rb") as image_file:
             buffer = image_file.read()
         image = engine.create_image(buffer)
-        expect(image.format).to_equal("JPEG2000")
-        expect(engine.subsampling).to_be_null()
+        assert image.format == "JPEG2000"
+        assert engine.subsampling is None
 
     def test_load_psd_image(self):
         engine = Engine(self.context)
         with open(join(STORAGE_PATH, "1x1.psd"), "rb") as image_file:
             buffer = image_file.read()
         image = engine.create_image(buffer)
-        expect(image.format).to_equal("PSD")
-        expect(engine.subsampling).to_be_null()
+        assert image.format == "PSD"
+        assert engine.subsampling is None
 
     def test_load_tif_16bit_per_channel_lsb(self):
         engine = Engine(self.context)
@@ -83,26 +81,26 @@ class PilEngineTestCase(TestCase):
             join(STORAGE_PATH, "gradient_lsb_16bperchannel.tif"), "rb"
         ) as image_file:
             buffer = image_file.read()
-        expect(buffer).not_to_equal(None)
+        assert buffer is not None
         engine.load(buffer, None)
 
         final_bytes = BytesIO(engine.read())
         image_file = Image.open(final_bytes)
-        expect(image_file.format).to_equal("PNG")
-        expect(image_file.size).to_equal((100, 100))
+        assert image_file.format == "PNG"
+        assert image_file.size == (100, 100)
 
     def test_load_animated_gif(self):
         engine = Engine(self.context)
         with open(join(STORAGE_PATH, "animated.gif"), "rb") as image_file:
             buffer = image_file.read()
-        expect(buffer).not_to_equal(None)
+        assert buffer is not None
         engine.load(buffer, None)
 
         final_bytes = BytesIO(engine.read())
         image_file = Image.open(final_bytes)
-        expect(image_file.format).to_equal("GIF")
-        expect(image_file.size).to_equal((100, 100))
-        expect(image_file.is_animated).to_be_true()
+        assert image_file.format == "GIF"
+        assert image_file.size == (100, 100)
+        assert image_file.is_animated
 
     def test_load_rotating_earth_gif(self):
         engine = Engine(self.context)
@@ -110,13 +108,13 @@ class PilEngineTestCase(TestCase):
             join(STORAGE_PATH, "Rotating_earth_(large).gif"), "rb"
         ) as image_file:
             buffer = image_file.read()
-        expect(buffer).not_to_equal(None)
+        assert buffer is not None
         engine.load(buffer, None)
 
         final_bytes = BytesIO(engine.read())
         image_file = Image.open(final_bytes)
-        expect(image_file.format).to_equal("GIF")
-        expect(image_file.size).to_equal((400, 400))
+        assert image_file.format == "GIF"
+        assert image_file.size == (400, 400)
 
     def test_load_tif_16bit_per_channel_msb(self):
         engine = Engine(self.context)
@@ -124,42 +122,40 @@ class PilEngineTestCase(TestCase):
             join(STORAGE_PATH, "gradient_msb_16bperchannel.tif"), "rb"
         ) as image_file:
             buffer = image_file.read()
-        expect(buffer).not_to_equal(None)
+        assert buffer is not None
         engine.load(buffer, None)
 
         final_bytes = BytesIO(engine.read())
         image_file = Image.open(final_bytes)
-        expect(image_file.format).to_equal("PNG")
-        expect(image_file.size).to_equal((100, 100))
+        assert image_file.format == "PNG"
+        assert image_file.size == (100, 100)
 
     def test_load_tif_8bit_per_channel(self):
         engine = Engine(self.context)
         with open(join(STORAGE_PATH, "gradient_8bit.tif"), "rb") as image_file:
             buffer = image_file.read()
-        expect(buffer).not_to_equal(None)
+        assert buffer is not None
         engine.load(buffer, None)
 
         final_bytes = BytesIO(engine.read())
         image_file = Image.open(final_bytes)
-        expect(image_file.format).to_equal("PNG")
-        expect(image_file.size).to_equal((100, 100))
+        assert image_file.format == "PNG"
+        assert image_file.size == (100, 100)
 
     def test_convert_png_1bit_to_png(self):
         engine = Engine(self.context)
         with open(join(STORAGE_PATH, "1bit.png"), "rb") as image_file:
             buffer = image_file.read()
         engine.load(buffer, ".png")
-        expect(engine.original_mode).to_equal(
-            "P"
-        )  # Note that this is not a true 1bit image, it's 8bit in black/white.
+        assert engine.original_mode == "P"
 
         engine.resize(10, 10)
         mode, _ = engine.image_data_as_rgb()
-        expect(mode).to_equal("RGB")
+        assert mode == "RGB"
 
         final_bytes = BytesIO(engine.read())
         mode = Image.open(final_bytes).mode
-        expect(mode).to_equal("P")
+        assert mode == "P"
 
     def test_convert_should_preserve_palette_mode(self):
         engine = Engine(self.context)
@@ -168,15 +164,15 @@ class PilEngineTestCase(TestCase):
         ) as image_file:
             buffer = image_file.read()
         engine.load(buffer, ".png")
-        expect(engine.original_mode).to_equal("P")
+        assert engine.original_mode == "P"
 
         engine.resize(10, 10)
         mode, _ = engine.image_data_as_rgb()
-        expect(mode).to_equal("RGB")
+        assert mode == "RGB"
 
         final_bytes = BytesIO(engine.read())
         mode = Image.open(final_bytes).mode
-        expect(mode).to_equal("P")
+        assert mode == "P"
 
     def test_can_set_resampling_filter(self):
         to_test = {
@@ -193,11 +189,11 @@ class PilEngineTestCase(TestCase):
         for setting, expected in to_test.items():
             cfg = Config(PILLOW_RESAMPLING_FILTER=setting)
             engine = Engine(Context(config=cfg))
-            expect(engine.get_resize_filter()).to_equal(expected)
+            assert engine.get_resize_filter() == expected
 
         cfg = Config()
         engine = Engine(Context(config=cfg))
-        expect(engine.get_resize_filter()).to_equal(Image.Resampling.LANCZOS)
+        assert engine.get_resize_filter() == Image.Resampling.LANCZOS
 
     def test_resize_truncated_image(self):
         engine = Engine(self.context)
@@ -208,7 +204,7 @@ class PilEngineTestCase(TestCase):
         engine.load(buffer, ".jpg")
         engine.resize(10, 10)
         mode, _ = engine.image_data_as_rgb()
-        expect(mode).to_equal("RGB")
+        assert mode == "RGB"
 
     def test_load_image_with_metadata(self):
         engine = Engine(self.context)
@@ -219,21 +215,22 @@ class PilEngineTestCase(TestCase):
 
         engine.load(buffer, None)
         image = engine.image
-        expect(image.format).to_equal("JPEG")
-        expect(engine.metadata).Not.to_be_null()
-        expect(engine.metadata.__class__.__name__).to_equal("dict")
+        assert image.format == "JPEG"
+        assert engine.metadata is not None
+        assert engine.metadata.__class__.__name__ == "dict"
 
-        expect(
+        assert (
             engine.metadata["Exif"][piexif.ExifIFD.LensSerialNumber]
-        ).to_equal("0000c139be")
-
-        expect(engine.metadata["0th"][piexif.ImageIFD.Software]).to_equal(
-            "Adobe Photoshop Lightroom 4.4 (Macintosh)"
+            == b"0000c139be"
         )
-
-        expect(
+        assert (
+            engine.metadata["0th"][piexif.ImageIFD.Software]
+            == b"Adobe Photoshop Lightroom 4.4 (Macintosh)"
+        )
+        assert (
             engine.metadata["Exif"][piexif.ExifIFD.DateTimeOriginal]
-        ).to_equal("2016:06:23 13:18:05")
+            == b"2016:06:23 13:18:05"
+        )
 
     def test_should_preserve_png_transparency(self):
         engine = Engine(self.context)
@@ -244,25 +241,430 @@ class PilEngineTestCase(TestCase):
             buffer = image_file.read()
 
         engine.load(buffer, "png")
-        expect(engine.original_mode).to_equal("P")
+        assert engine.original_mode == "P"
         engine.resize(200, 150)
 
         img = Image.open(BytesIO(engine.read(".png")))
 
-        expect(img.mode).to_equal("P")
-        expect(img.format.lower()).to_equal("png")
+        assert img.mode == "P"
+        assert img.format.lower() == "png"
 
         transparent_pixels_count = sum(
             img.convert("RGBA")
-            .split()[3]  # Get alpha channel
-            .point(
-                lambda x: 0 if x else 1
-            )  # return 1 if pixel is transparent, 0 otherwise
+            .split()[3]
+            .point(lambda x: 0 if x else 1)
+            .getdata()
+        )
+        assert transparent_pixels_count > 19000
+
+        alpha_histogram = img.convert("RGBA").getchannel("A").histogram()
+        assert sum(alpha_histogram[1:255]) > 0
+
+    def bilevel_png(self, **options):
+        bilevel = Image.new("1", (20, 20), 1)
+        bilevel.paste(0, (0, 0, 10, 20))
+        png_buffer = BytesIO()
+        bilevel.save(png_buffer, "PNG", **options)
+
+        return png_buffer.getvalue()
+
+    def test_resize_should_promote_bilevel_colorkey_to_alpha(self):
+        engine = Engine(self.context)
+
+        engine.load(self.bilevel_png(transparency=0), "png")
+        assert engine.original_mode == "1"
+        expected_alpha = (
+            engine.image.convert("RGBA")
+            .resize((10, 10), engine.get_resize_filter())
+            .getchannel("A")
+            .tobytes()
+        )
+        assert 0 < min(expected_alpha[4:6]) < max(expected_alpha[4:6]) < 255
+
+        engine.resize(10, 10)
+
+        assert engine.image.mode == "RGBA"
+        assert engine.image.getchannel("A").tobytes() == expected_alpha
+
+    def test_read_should_quantize_resized_bilevel_colorkey_image(self):
+        engine = Engine(self.context)
+
+        engine.load(self.bilevel_png(transparency=0), "png")
+        engine.resize(10, 10)
+
+        image = Image.open(BytesIO(engine.read(".png")))
+        alpha = image.convert("RGBA").getchannel("A")
+
+        assert image.mode == "P"
+        assert alpha.getpixel((0, 5)) == 0
+        assert alpha.getpixel((9, 5)) > 240
+
+    def test_read_should_keep_bilevel_colorkey_alpha_without_indexed_mode(
+        self,
+    ):
+        self.context.config.PILLOW_PRESERVE_INDEXED_MODE = False
+        engine = Engine(self.context)
+
+        engine.load(self.bilevel_png(transparency=0), "png")
+        engine.resize(10, 10)
+
+        image = Image.open(BytesIO(engine.read(".png")))
+        alpha = image.getchannel("A")
+
+        assert image.mode == "RGBA"
+        assert alpha.getpixel((0, 5)) == 0
+        assert alpha.getpixel((9, 5)) == 255
+
+    def test_read_should_keep_bilevel_colorkey_alpha_in_webp(self):
+        engine = Engine(self.context)
+
+        engine.load(self.bilevel_png(transparency=0), "png")
+        engine.resize(10, 10)
+
+        image = Image.open(BytesIO(engine.read(".webp")))
+        alpha = image.getchannel("A")
+
+        assert image.mode == "RGBA"
+        assert alpha.getpixel((0, 5)) == 0
+        assert alpha.getpixel((9, 5)) == 255
+
+    def test_read_should_keep_bilevel_colorkey_alpha_in_webp_without_resize(
+        self,
+    ):
+        engine = Engine(self.context)
+
+        engine.load(self.bilevel_png(transparency=0), "png")
+        engine.crop(0, 0, 20, 10)
+
+        image = Image.open(BytesIO(engine.read(".webp")))
+        alpha = image.getchannel("A")
+
+        assert image.mode == "RGBA"
+        assert alpha.getpixel((0, 5)) == 0
+        assert alpha.getpixel((19, 5)) == 255
+
+    def test_create_image_should_normalize_raw_bilevel_colorkey(self):
+        engine = Engine(self.context)
+        png = self.bilevel_png(transparency=1)
+        raw_key_image = Image.open(BytesIO(png))
+        raw_key_image.info["transparency"] = 1
+
+        with mock.patch.object(Image, "open", return_value=raw_key_image):
+            engine.load(png, "png")
+
+        assert engine.image.info["transparency"] == 255
+
+        engine.resize(10, 10)
+        alpha = engine.image.getchannel("A")
+
+        assert alpha.getpixel((0, 5)) == 255
+        assert alpha.getpixel((9, 5)) == 0
+
+    def test_read_should_restore_bilevel_mode_without_colorkey(self):
+        engine = Engine(self.context)
+
+        engine.load(self.bilevel_png(), "png")
+        engine.resize(10, 10)
+
+        image = Image.open(BytesIO(engine.read(".png")))
+
+        assert image.mode == "1"
+        assert "transparency" not in image.info
+
+    def test_should_preserve_gif_transparency_from_indexed_source(self):
+        source = Image.new("P", (200, 200))
+        source.putpalette([255, 0, 0] + [0, 0, 0] * 255)
+        source.paste(1, (0, 100, 200, 200))
+
+        source_buffer = BytesIO()
+        source.save(source_buffer, "GIF", transparency=1)
+
+        engine = Engine(self.context)
+        engine.load(source_buffer.getvalue(), ".gif")
+        engine.resize(100, 100)
+
+        image = Image.open(BytesIO(engine.read(".gif")))
+        rgba_image = image.convert("RGBA")
+
+        assert image.mode == "P"
+        assert image.format == "GIF"
+        assert "transparency" in image.info
+        assert rgba_image.getpixel((50, 25))[3] == 255
+        assert rgba_image.getpixel((50, 75))[3] == 0
+
+    def test_should_preserve_gif_transparency_around_dark_edges(self):
+        source = Image.new("P", (400, 200), 1)
+        source.putpalette([10, 10, 10, 255, 255, 255] + [0, 0, 0] * 254)
+        draw = ImageDraw.Draw(source)
+        for x in range(0, 400, 20):
+            draw.line((x, 20, x + 60, 180), fill=0, width=3)
+
+        source_buffer = BytesIO()
+        source.save(source_buffer, "GIF", transparency=1)
+
+        engine = Engine(self.context)
+        engine.load(source_buffer.getvalue(), ".gif")
+        engine.resize(133, 66)
+
+        image = Image.open(BytesIO(engine.read(".gif")))
+        alpha = image.convert("RGBA").getchannel("A")
+
+        assert "transparency" in image.info
+        assert alpha.getextrema() == (0, 255)
+        assert alpha.getpixel((60, 2)) == 0
+
+    def test_should_keep_opaque_indexed_gif_opaque(self):
+        source = Image.new("P", (200, 200))
+        source.putpalette([255, 0, 0, 0, 0, 255] + [0, 0, 0] * 254)
+        source.paste(1, (0, 100, 200, 200))
+
+        source_buffer = BytesIO()
+        source.save(source_buffer, "GIF")
+
+        engine = Engine(self.context)
+        engine.load(source_buffer.getvalue(), ".gif")
+        engine.resize(100, 100)
+
+        image = Image.open(BytesIO(engine.read(".gif")))
+
+        assert image.mode == "P"
+        assert image.format == "GIF"
+        assert "transparency" not in image.info
+
+    def test_should_keep_gif_opaque_when_transparency_index_is_unused(self):
+        source = Image.new("P", (200, 200))
+        source.putpalette([255, 0, 0, 0, 0, 255] + [0, 0, 0] * 254)
+        source.paste(1, (0, 100, 200, 200))
+
+        source_buffer = BytesIO()
+        source.save(source_buffer, "GIF", transparency=2, optimize=False)
+
+        engine = Engine(self.context)
+        engine.load(source_buffer.getvalue(), ".gif")
+        engine.resize(100, 100)
+
+        image = Image.open(BytesIO(engine.read(".gif")))
+        alpha = image.convert("RGBA").getchannel("A")
+
+        assert alpha.getextrema() == (255, 255)
+
+    def test_should_preserve_png_transparency_after_grayscale(self):
+        engine = Engine(self.context)
+
+        with open(
+            join(STORAGE_PATH, "paletted-transparent.png"), "rb"
+        ) as image_file:
+            buffer = image_file.read()
+
+        engine.load(buffer, "png")
+        assert engine.original_mode == "P"
+        engine.resize(200, 150)
+        # Leaves the image in LA mode, which quantize() does not accept
+        engine.convert_to_grayscale()
+
+        img = Image.open(BytesIO(engine.read(".png")))
+
+        assert img.mode == "P"
+        assert img.format.lower() == "png"
+
+        # Every pixel must be grey, so that neither a no-op grayscale nor
+        # colour reintroduced by the quantization goes unnoticed
+        red, green, blue = img.convert("RGB").split()
+        assert ImageChops.difference(red, green).getextrema()[1] == 0
+        assert ImageChops.difference(green, blue).getextrema()[1] == 0
+
+        transparent_pixels_count = sum(
+            img.convert("RGBA")
+            .split()[3]
+            .point(lambda x: 0 if x else 1)
             .getdata()
         )
 
-        # Image has total of 200x150=30000 pixels. Most of them should be transparent
-        expect(transparent_pixels_count).to_be_greater_than(19000)
+        assert transparent_pixels_count > 19000
+
+    def test_convert_to_grayscale_should_preserve_palette_transparency(self):
+        engine = Engine(self.context)
+
+        with open(
+            join(STORAGE_PATH, "paletted-transparent.png"), "rb"
+        ) as image_file:
+            buffer = image_file.read()
+
+        engine.load(buffer, "png")
+        assert engine.original_mode == "P"
+        expected_alpha = engine.image.convert("RGBA").getchannel("A").tobytes()
+
+        image = engine.convert_to_grayscale()
+
+        assert image.mode == "LA"
+        assert image.getchannel("A").tobytes() == expected_alpha
+
+    def test_image_data_as_rgb_should_preserve_colorkey_transparency(self):
+        engine = Engine(self.context)
+
+        gray = Image.new("L", (5, 5), 128)
+        png_buffer = BytesIO()
+        gray.save(png_buffer, "PNG", transparency=128)
+
+        engine.load(png_buffer.getvalue(), "png")
+        assert engine.original_mode == "L"
+        expected_alpha = engine.image.convert("RGBA").getchannel("A").tobytes()
+
+        mode, data = engine.image_data_as_rgb()
+
+        assert mode == "RGBA"
+        assert data[3::4] == expected_alpha
+
+    def test_image_data_as_rgb_should_preserve_rgb_colorkey_transparency(
+        self,
+    ):
+        engine = Engine(self.context)
+
+        magenta = Image.new("RGB", (5, 5), (255, 0, 255))
+        png_buffer = BytesIO()
+        magenta.save(png_buffer, "PNG", transparency=(255, 0, 255))
+
+        engine.load(png_buffer.getvalue(), "png")
+        assert engine.original_mode == "RGB"
+        expected_alpha = engine.image.convert("RGBA").getchannel("A").tobytes()
+
+        mode, data = engine.image_data_as_rgb()
+
+        assert mode == "RGBA"
+        assert data[3::4] == expected_alpha
+
+    def test_read_should_quantize_grayscale_images_with_alpha(self):
+        engine = Engine(self.context)
+
+        palette = Image.new("RGBA", (5, 5), (255, 0, 255, 0)).quantize()
+        png_buffer = BytesIO()
+        palette.save(png_buffer, "PNG")
+
+        engine.load(png_buffer.getvalue(), "png")
+        assert engine.original_mode == "P"
+        engine.convert_to_grayscale()
+        assert engine.image.mode == "LA"
+        expected_alpha = engine.image.getchannel("A").tobytes()
+
+        image = Image.open(BytesIO(engine.read(".png")))
+
+        assert image.mode == "P"
+        assert (
+            image.convert("RGBA").getchannel("A").tobytes() == expected_alpha
+        )
+
+    def test_resize_should_promote_colorkey_to_alpha(self):
+        engine = Engine(self.context)
+
+        gray = Image.new("L", (2, 1))
+        gray.putdata([128, 255])
+        png_buffer = BytesIO()
+        gray.save(png_buffer, "PNG", transparency=128)
+
+        engine.load(png_buffer.getvalue(), "png")
+        expected_alpha = (
+            engine.image.convert("LA")
+            .resize((4, 1), engine.get_resize_filter())
+            .getchannel("A")
+            .tobytes()
+        )
+        assert 0 < expected_alpha[1] < 255
+
+        engine.resize(4, 1)
+        assert engine.image.mode == "LA"
+
+        mode, data = engine.image_data_as_rgb()
+
+        assert mode == "RGBA"
+        assert data[3::4] == expected_alpha
+
+    def test_resize_should_promote_rgb_colorkey_to_alpha(self):
+        engine = Engine(self.context)
+
+        magenta = Image.new("RGB", (2, 1))
+        magenta.putdata([(255, 0, 255), (0, 200, 0)])
+        png_buffer = BytesIO()
+        magenta.save(png_buffer, "PNG", transparency=(255, 0, 255))
+
+        engine.load(png_buffer.getvalue(), "png")
+        expected_alpha = (
+            engine.image.convert("RGBA")
+            .resize((4, 1), engine.get_resize_filter())
+            .getchannel("A")
+            .tobytes()
+        )
+        assert 0 < expected_alpha[1] < 255
+
+        engine.resize(4, 1)
+        assert engine.image.mode == "RGBA"
+
+        image = engine.convert_to_grayscale()
+
+        assert image.mode == "LA"
+        assert image.getchannel("A").tobytes() == expected_alpha
+
+    def test_convert_to_grayscale_should_ignore_unused_colorkey(self):
+        engine = Engine(self.context)
+
+        gray = Image.new("RGB", (5, 5), (105, 105, 105))
+        png_buffer = BytesIO()
+        gray.save(png_buffer, "PNG", transparency=(255, 0, 255))
+
+        engine.load(png_buffer.getvalue(), "png")
+        engine.convert_to_grayscale()
+
+        image = Image.open(BytesIO(engine.read(".png")))
+
+        assert "transparency" not in image.info
+        assert image.convert("RGBA").getchannel("A").getextrema() == (
+            255,
+            255,
+        )
+
+    def test_should_keep_alpha_channel_of_opaque_images(self):
+        engine = Engine(self.context)
+
+        engine.image = Image.new("LA", (5, 5), (128, 255))
+        mode, _ = engine.image_data_as_rgb()
+        assert mode == "RGBA"
+
+        engine.image = Image.new("RGBA", (5, 5), (128, 128, 128, 255))
+        assert engine.convert_to_grayscale().mode == "LA"
+
+    def test_read_should_keep_gif_transparency_after_grayscale(self):
+        engine = Engine(self.context)
+
+        source = Image.new("RGBA", (10, 10), (200, 30, 30, 255))
+        source.paste((90, 200, 90, 0), (0, 0, 5, 10))
+        png_buffer = BytesIO()
+        source.save(png_buffer, "PNG")
+
+        engine.load(png_buffer.getvalue(), "png")
+        engine.convert_to_grayscale()
+        assert engine.image.mode == "LA"
+
+        image = Image.open(BytesIO(engine.read(".gif")))
+        alpha = image.convert("RGBA").getchannel("A")
+
+        assert image.format == "GIF"
+        assert alpha.getpixel((2, 5)) == 0
+        assert alpha.getpixel((7, 5)) == 255
+
+    def test_read_should_clip_32bit_grayscale_to_16bit_png(self):
+        for extension in (".png", ".tif"):
+            with self.subTest(extension=extension):
+                engine = Engine(self.context)
+                engine.image = Image.new("I", (3, 1))
+                engine.image.putdata([-5, 1000, 70000])
+
+                image = Image.open(BytesIO(engine.read(extension)))
+
+                assert image.format == "PNG"
+                assert [image.getpixel((x, 0)) for x in range(3)] == [
+                    0,
+                    1000,
+                    65535,
+                ]
 
     @skip_unless_avif
     def test_convert_jpg_to_avif(self):
@@ -270,10 +672,10 @@ class PilEngineTestCase(TestCase):
         with open(join(STORAGE_PATH, "image.jpg"), "rb") as image_file:
             buffer = image_file.read()
         engine.load(buffer, ".jpg")
-        expect(engine.image.format).to_equal("JPEG")
+        assert engine.image.format == "JPEG"
         avif_bytes = BytesIO(engine.read(".avif"))
         with Image.open(avif_bytes) as img:
-            expect(img.format).to_equal("AVIF")
+            assert img.format == "AVIF"
 
     @skip_unless_avif_encoder("aom")
     def test_avif_codec_setting(self):
@@ -308,11 +710,11 @@ class PilEngineTestCase(TestCase):
         with open(join(STORAGE_PATH, "1bit.png"), "rb") as image_file:
             buffer = image_file.read()
         engine.load(buffer, ".png")
-        expect(engine.size).to_equal((691, 212))
+        assert engine.size == (691, 212)
         avif_bytes = BytesIO(engine.read(".avif"))
         with Image.open(avif_bytes) as img:
-            expect(img.format).to_equal("AVIF")
-            expect(img.size).to_equal((690, 212))
+            assert img.format == "AVIF"
+            assert img.size == (690, 212)
 
     @skip_unless_heif
     def test_convert_jpg_to_heif(self):
@@ -320,10 +722,10 @@ class PilEngineTestCase(TestCase):
         with open(join(STORAGE_PATH, "image.jpg"), "rb") as image_file:
             buffer = image_file.read()
         engine.load(buffer, ".jpg")
-        expect(engine.image.format).to_equal("JPEG")
+        assert engine.image.format == "JPEG"
         heif_bytes = BytesIO(engine.read(".heic"))
         with Image.open(heif_bytes) as img:
-            expect(img.format).to_equal("HEIF")
+            assert img.format == "HEIF"
 
     @skip_unless_heif
     def test_heif_odd_dimensions(self):
@@ -331,11 +733,11 @@ class PilEngineTestCase(TestCase):
         with open(join(STORAGE_PATH, "1bit.png"), "rb") as image_file:
             buffer = image_file.read()
         engine.load(buffer, ".png")
-        expect(engine.size).to_equal((691, 212))
+        assert engine.size == (691, 212)
         heif_bytes = BytesIO(engine.read(".heic"))
         with Image.open(heif_bytes) as img:
-            expect(img.format).to_equal("HEIF")
-            expect(img.size).to_equal((691, 212))
+            assert img.format == "HEIF"
+            assert img.size == (691, 212)
 
     def test_should_preserve_copyright_exif_in_image(self):
         self.context.config.PRESERVE_EXIF_COPYRIGHT_INFO = True
@@ -346,14 +748,14 @@ class PilEngineTestCase(TestCase):
 
         final_bytes = BytesIO(engine.read())
         image = Image.open(final_bytes)
-        expect(image.info.get("exif")).not_to_be_null()
+        assert image.info.get("exif") is not None
 
         exifs = piexif.load(engine.get_exif_copyright())
 
-        expect(exifs["0th"]).not_to_be_null()
-        expect(len(exifs["0th"].items())).to_equal(3)
+        assert exifs["0th"] is not None
+        assert len(exifs["0th"].items()) == 3
         for k in KEEP_EXIF_COPYRIGHT_TAGS:
-            expect(exifs["0th"][k]).not_to_be_null()
+            assert exifs["0th"][k] is not None
 
     def test_should_preserve_copyright_exif_in_image_with_broken_exif_tag(
         self,
@@ -370,11 +772,11 @@ class PilEngineTestCase(TestCase):
         image = Image.open(final_bytes)
         exif_original = image.info.get("exif")
 
-        expect(exif_original).not_to_be_null()
+        assert exif_original is not None
 
         exif = engine.get_exif_copyright()
 
-        expect(exif).to_equal(exif_original)
+        assert exif == exif_original
 
     def test_should_read_image_without_copyright_exif(self):
         engine = Engine(self.context)
@@ -384,7 +786,58 @@ class PilEngineTestCase(TestCase):
 
         final_bytes = BytesIO(engine.read())
         image = Image.open(final_bytes)
-        expect(image.info.get("exif")).to_be_null()
+        assert image.info.get("exif") is None
+
+
+@pytest.mark.parametrize(
+    "extension",
+    [
+        ".gif",
+        ".webp",
+        ".png",
+        pytest.param(
+            ".avif",
+            marks=pytest.mark.skipif(
+                not AVIF_AVAILABLE, reason="AVIF format support not found"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("resize", [False, True])
+@pytest.mark.parametrize("durations", [[100, 200, 6010], None])
+def test_animated_gif_frame_durations(extension, resize, durations):
+    frames = [
+        Image.new("RGB", (32, 32), color) for color in ("red", "green", "blue")
+    ]
+    options = {} if durations is None else {"duration": durations}
+    with BytesIO() as source:
+        frames[0].save(
+            source,
+            "GIF",
+            save_all=True,
+            append_images=frames[1:],
+            loop=0,
+            optimize=False,
+            **options,
+        )
+        engine = Engine(PilEngineTestCase().get_context())
+        engine.load(source.getvalue(), ".gif")
+
+    if resize:
+        engine.resize(16, 16)
+
+    with Image.open(BytesIO(engine.read(extension))) as result:
+        assert result.size == ((16, 16) if resize else (32, 32))
+        assert result.n_frames == len(frames)
+        actual_durations = []
+        for frame in ImageSequence.Iterator(result):
+            # WebP exposes the frame duration after loading its pixels.
+            frame.load()
+            actual_durations.append(frame.info.get("duration", 0))
+
+    assert actual_durations == (
+        durations if durations is not None else [80] * len(frames)
+    )
 
 
 @skip_unless_avif_encoder("svt")
@@ -416,13 +869,13 @@ def test_avif_convert_cmyk_color_profile_to_srgb(srgb_profile):
     with open(join(STORAGE_PATH, "cmyk-icc.jpg"), "rb") as image_file:
         buffer = image_file.read()
     engine.load(buffer, ".jpg")
-    expect(engine.image.getpixel((0, 0))).to_equal((102, 1, 45, 0))
+    assert engine.image.getpixel((0, 0)) == (102, 1, 45, 0)
     avif_bytes = BytesIO(engine.read(".avif"))
     with Image.open(avif_bytes) as img:
-        expect(img.format).to_equal("AVIF")
-        expect(img.mode).to_equal("RGB")
+        assert img.format == "AVIF"
+        assert img.mode == "RGB"
         rgb_color = img.getpixel((0, 0))
-        expect(rgb_color).to_equal((148, 212, 212))
+        assert rgb_color == (148, 212, 212)
 
 
 @skip_unless_avif
@@ -432,10 +885,10 @@ def test_avif_convert_gray_color_profile_to_srgb():
     with open(join(STORAGE_PATH, "grayscale-icc.jpg"), "rb") as image_file:
         buffer = image_file.read()
     engine.load(buffer, ".jpg")
-    expect(engine.image.getpixel((0, 0))).to_equal(186)
+    assert engine.image.getpixel((0, 0)) == 186
     avif_bytes = BytesIO(engine.read(".avif"))
     with Image.open(avif_bytes) as img:
-        expect(img.format).to_equal("AVIF")
-        expect(img.mode).to_equal("RGB")
+        assert img.format == "AVIF"
+        assert img.mode == "RGB"
         rgb_color = img.getpixel((0, 0))
-        expect(rgb_color).to_equal((200, 200, 200))
+        assert rgb_color == (200, 200, 200)

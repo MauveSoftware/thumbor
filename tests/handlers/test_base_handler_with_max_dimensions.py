@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -10,7 +9,6 @@
 
 from shutil import which
 
-from preggy import expect
 from tornado.testing import gen_test
 
 from tests.handlers.test_base_handler import BaseImagingTestCase
@@ -51,9 +49,9 @@ class ImageOperationsWithMaxWidthAndMaxHeight(BaseImagingTestCase):
         response = await self.async_fetch("/unsafe/200x200/grayscale.jpg")
         engine = Engine(self.context)
         engine.load(response.body, ".jpg")
-        expect(response.code).to_equal(200)
-        expect(response.headers["Content-Type"]).to_equal("image/jpeg")
-        expect(engine.size).to_equal((150, 150))
+        assert response.code == 200
+        assert response.headers["Content-Type"] == "image/jpeg"
+        assert engine.size == (150, 150)
 
 
 class ImageOperationsWithMaxWidthAndMaxHeightShouldNotUpscale(
@@ -91,14 +89,14 @@ class ImageOperationsWithMaxWidthAndMaxHeightShouldNotUpscale(
     @gen_test
     async def test_should_return_original_image_size(self):
         response = await self.async_fetch(
-            "/unsafe/filters:format(jpeg)/very-small-jpeg.jpg"
+            "/unsafe/filters:format(jpeg)/20x20.jpg"
         )
 
         engine = Engine(self.context)
         engine.load(response.body, ".jpg")
-        expect(response.code).to_equal(200)
-        expect(response.headers["Content-Type"]).to_equal("image/jpeg")
-        expect(engine.size).to_equal((100, 100))
+        assert response.code == 200
+        assert response.headers["Content-Type"] == "image/jpeg"
+        assert engine.size == (20, 20)
 
     @gen_test
     async def test_should_return_original_image_size_with_normalize(self):
@@ -108,9 +106,9 @@ class ImageOperationsWithMaxWidthAndMaxHeightShouldNotUpscale(
 
         engine = Engine(self.context)
         engine.load(response.body, ".jpg")
-        expect(response.code).to_equal(200)
-        expect(response.headers["Content-Type"]).to_equal("image/jpeg")
-        expect(engine.size).to_equal((159, 239))
+        assert response.code == 200
+        assert response.headers["Content-Type"] == "image/jpeg"
+        assert engine.size == (159, 239)
 
 
 class ImageOperationsWithMaxPixels(BaseImagingTestCase):
@@ -134,4 +132,4 @@ class ImageOperationsWithMaxPixels(BaseImagingTestCase):
     @gen_test
     async def test_should_error(self):
         response = await self.async_fetch("/unsafe/200x200/grayscale.jpg")
-        expect(response.code).to_equal(400)
+        assert response.code == 400

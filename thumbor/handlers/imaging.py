@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -20,9 +19,25 @@ class ImagingHandler(ContextHandler):
             return super().compute_etag()
         return None
 
+    @staticmethod
+    def _strip_url_signature_prefix(url, url_signature, quoted_hash):
+        prefixes = (f"/{url_signature}/", f"/{quoted_hash}/")
+        for prefix in prefixes:
+            if url.startswith(prefix):
+                return url[len(prefix) :]
+        return url
+
+    def _is_size_allowed(self):
+        allowed_sizes = self.context.config.ALLOWED_SIZES
+        if not allowed_sizes:
+            return True
+
+        request = self.context.request
+        return f"{request.width}x{request.height}" in allowed_sizes
+
     async def check_image(
         self, kwargs
-    ):  # pylint: disable=too-many-return-statements
+    ):  # pylint: disable=too-many-return-statements,too-many-branches
         if self.context.config.MAX_ID_LENGTH > 0:
             # Check if an image with an uuid exists in storage
             exists = await self.context.modules.storage.exists(
@@ -67,6 +82,10 @@ class ImagingHandler(ContextHandler):
             )
             return
 
+        if not self._is_size_allowed():
+            self._error(400, f"Image size is not allowed by the config: {url}")
+            return
+
         if self.context.config.USE_BLACKLIST:
             blacklist = await self.get_blacklist_contents()
             if self.context.request.image_url in blacklist:
@@ -88,9 +107,9 @@ class ImagingHandler(ContextHandler):
                 self._error(400, f"Invalid hash: {self.context.request.hash}")
                 return
 
-            url_to_validate = url.replace(
-                f"/{self.context.request.hash}/", ""
-            ).replace(f"/{quoted_hash}/", "")
+            url_to_validate = self._strip_url_signature_prefix(
+                url, self.context.request.hash, quoted_hash
+            )
 
             valid = signer.validate(
                 unquote(url_signature).encode(), url_to_validate

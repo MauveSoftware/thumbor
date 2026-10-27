@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -10,7 +9,6 @@
 
 import datetime
 import functools
-import re
 import sys
 import traceback
 
@@ -20,6 +18,13 @@ from tornado.locks import Condition
 
 import thumbor.filters
 from thumbor import __version__
+from thumbor.auto_image_format import (
+    AUTO_IMAGE_FORMAT_ACCEPT_ATTRS,
+    DEFAULT_AUTO_IMAGE_FORMAT_PREFERENCE,
+    get_active_auto_image_formats,
+    get_normalized_auto_image_format_preference,
+    has_auto_image_format_preference,
+)
 from thumbor.context import Context, RequestParameters
 from thumbor.engines import BaseEngine, EngineResult
 from thumbor.engines.json_engine import JSONEngine
@@ -31,6 +36,57 @@ from thumbor.transformer import Transformer
 from thumbor.utils import CONTENT_TYPE, EXTENSION, logger
 
 HTTP_DATE_FMT = "%a, %d %b %Y %H:%M:%S GMT"
+
+MIMETYPE_IMAGE_WILDCARD = "image/*"
+MIMETYPE_JPEG = "image/jpeg"
+MIMETYPE_JPG = "image/jpg"
+
+PREFERENCE_AUTO_IMAGE_FORMAT_METHODS = {
+    "webp": "_supports_webp",
+    "avif": "_supports_avif",
+    "jpg": "_supports_jpg",
+    "heif": "_supports_heif",
+    "png": "_supports_png",
+}
+
+LEGACY_AUTO_IMAGE_FORMAT_METHODS = {
+    "webp": "can_auto_convert_to_webp",
+    "avif": "can_auto_convert_to_avif",
+    "jpg": "_can_auto_convert_to_jpg_in_legacy_mode",
+    "heif": "can_auto_convert_to_heif",
+    "png": "can_auto_convert_to_png",
+}
+
+LEGACY_AUTO_IMAGE_FORMAT_LOG_MESSAGES = {
+    "webp": "Image format set by AUTO_WEBP as %s.",
+    "avif": "Image format set by AUTO_AVIF as %s.",
+    "jpg": "Image format set by AUTO_PNG_TO_JPG or AUTO_JPG as %s.",
+    "heif": "Image format set by AUTO_HEIF as %s.",
+    "png": "Image format set by AUTO_PNG as %s.",
+}
+
+
+def _has_explicit_format_filter(filters):
+    if not isinstance(filters, str):
+        return False
+
+    marker = "format("
+    search_from = 0
+
+    while True:
+        match_start = filters.find(marker, search_from)
+        if match_start == -1:
+            return False
+
+        argument_start = match_start + len(marker)
+        closing_parenthesis = filters.find(")", argument_start)
+        if closing_parenthesis == -1:
+            return False
+        if closing_parenthesis > argument_start:
+            return True
+
+        search_from = argument_start
+
 
 # Handlers should not override __init__ pylint: disable=attribute-defined-outside-init,arguments-differ
 # pylint: disable=broad-except,abstract-method,too-many-branches,too-many-return-statements,too-many-statements,too-many-lines
@@ -139,7 +195,11 @@ class BaseHandler(tornado.web.RequestHandler):
             or not self.context.request.unsafe
         )
 
-        if self.context.modules.result_storage and should_store:
+        if (
+            self.context.modules.result_storage
+            and should_store
+            and self._can_use_result_storage_with_auto_image_formats()
+        ):
             start = datetime.datetime.now()
 
             try:
@@ -343,7 +403,7 @@ class BaseHandler(tornado.web.RequestHandler):
     async def after_transform(self):
         if (
             self.context.request.extension != ".gif"
-            or self.context.config.USE_GIFSICLE_ENGINE is None
+            or not self.context.config.USE_GIFSICLE_ENGINE
         ):
             await self.filters_runner.apply_filters(
                 thumbor.filters.PHASE_POST_TRANSFORM
@@ -351,13 +411,23 @@ class BaseHandler(tornado.web.RequestHandler):
 
         await self.finish_request()
 
-    def is_webp(self, context):
+    def _supports_webp(self, context=None):
+        if context is None:
+            context = self.context
+
+        request = context.request
+
         return (
-            context.config.AUTO_WEBP
-            and context.request.accepts_webp
-            and not context.request.engine.is_multiple()
-            and context.request.engine.can_convert_to_webp()
+            request.accepts_webp
+            and not request.engine.is_multiple()
+            and request.engine.can_convert_to_webp()
         )
+
+    def is_webp(self, context):
+        return context.config.AUTO_WEBP and self._supports_webp(context)
+
+    def can_auto_convert_to_webp(self):
+        return self.is_webp(self.context)
 
     def is_animated_gif(self, data):
         if data[:6] not in [b"GIF87a", b"GIF89a"]:
@@ -401,13 +471,23 @@ class BaseHandler(tornado.web.RequestHandler):
 
         return frames > 1
 
+    def is_animated_webp(self, data):
+        # Only the extended (VP8X) header carries the animation flag, bit 1
+        # of the flags byte that follows its chunk size.
+        return (
+            data[:4] == b"RIFF"
+            and data[8:16] == b"WEBPVP8X"
+            and len(data) > 20
+            and bool(data[20] & 0x02)
+        )
+
     def can_auto_convert_png_to_jpg(self):
         request_override = self.context.request.auto_png_to_jpg
         config = self.context.config
 
         enabled = (
-            request_override is None
-            if config.AUTO_PNG_TO_JPG
+            config.AUTO_PNG_TO_JPG
+            if request_override is None
             else request_override
         )
 
@@ -417,67 +497,205 @@ class BaseHandler(tornado.web.RequestHandler):
         return False
 
     def accepts_mime_type(self, mimetype=""):
-        if self.context.request and self.context.request.headers:
-            return mimetype in self.context.request.headers.get("Accept", "")
+        request = self.context.request
+        if request and request.headers:
+            accepted_media_types = getattr(
+                request, "_accepted_media_types", None
+            )
+            if accepted_media_types is not None:
+                normalized_mimetype = mimetype.strip().lower()
+
+                if normalized_mimetype in accepted_media_types:
+                    return accepted_media_types[normalized_mimetype] > 0
+
+                return (
+                    normalized_mimetype.startswith("image/")
+                    and normalized_mimetype != MIMETYPE_IMAGE_WILDCARD
+                    and accepted_media_types.get(MIMETYPE_IMAGE_WILDCARD, 0)
+                    > 0
+                )
+
+            return mimetype in request.headers.get("Accept", "")
 
         return False
 
-    def can_auto_convert_to_avif(self):
-        auto_avif = self.context.config.AUTO_AVIF
-        accepts_avif = self.accepts_mime_type("image/avif")
+    def _custom_accepts_jpeg(self, accepts_mime_type_method):
+        accepted_media_types = getattr(
+            self.context.request,
+            "_accepted_media_types",
+            None,
+        )
+        if accepted_media_types is not None:
+            for mimetype in (
+                MIMETYPE_JPEG,
+                MIMETYPE_JPG,
+                MIMETYPE_IMAGE_WILDCARD,
+                "*/*",
+            ):
+                if mimetype in accepted_media_types:
+                    if accepted_media_types[mimetype] <= 0:
+                        return False
+                    break
 
-        if (
-            auto_avif is True
-            and accepts_avif is True
-            and not self.context.request.engine.is_multiple()
-        ):
-            return self.context.request.engine.can_auto_convert_to_avif()
-
-        return False
-
-    def can_auto_convert_to_heif(self):
-        auto_heif = self.context.config.AUTO_HEIF
-        accepts_heif = self.accepts_mime_type("image/heif")
-
-        if (
-            auto_heif
-            and accepts_heif
-            and not self.context.request.engine.is_multiple()
-        ):
-            return self.context.request.engine.can_auto_convert_to_heif()
-
-        return False
-
-    def can_auto_convert_to_jpg(self):
-        auto_jpg = self.context.config.AUTO_JPG
-        accepts_jpg = (
-            self.accepts_mime_type("*/*")
-            or self.accepts_mime_type("image/jpg")
-            or self.accepts_mime_type("image/jpeg")
+        return any(
+            accepts_mime_type_method(mimetype)
+            for mimetype in ("*/*", MIMETYPE_JPG, MIMETYPE_JPEG)
         )
 
-        if (
-            auto_jpg
-            and accepts_jpg
-            and not self.context.request.engine.is_multiple()
-            and not self.context.request.engine.has_transparency()
-        ):
+    def _has_custom_accepts_mime_type(self):
+        accepts_mime_type_method = self.accepts_mime_type
+        return (
+            getattr(accepts_mime_type_method, "__func__", None)
+            is not BaseHandler.accepts_mime_type
+        )
+
+    def _can_use_result_storage_with_auto_image_formats(self):
+        active_formats = get_active_auto_image_formats(self.context.config)
+        has_extended_format = any(
+            image_format != "webp" for image_format in active_formats
+        )
+
+        if not has_extended_format:
             return True
 
-        return False
+        if self._has_custom_accepts_mime_type():
+            return False
+
+        request = self.context.request
+        return all(
+            hasattr(request, AUTO_IMAGE_FORMAT_ACCEPT_ATTRS[image_format])
+            for image_format in active_formats
+        )
+
+    def _accepts_parsed_mime_type(self, accept_attr, *mimetypes):
+        accepts_mime_type_method = self.accepts_mime_type
+        if self._has_custom_accepts_mime_type():
+            if accept_attr == "accepts_jpeg":
+                return self._custom_accepts_jpeg(accepts_mime_type_method)
+
+            return any(
+                accepts_mime_type_method(mimetype) for mimetype in mimetypes
+            )
+
+        request = self.context.request
+        if hasattr(request, accept_attr):
+            return bool(getattr(request, accept_attr))
+
+        return any(
+            accepts_mime_type_method(mimetype) for mimetype in mimetypes
+        )
+
+    def _supports_avif(self):
+        request = self.context.request
+
+        return (
+            self._accepts_parsed_mime_type("accepts_avif", "image/avif")
+            and not request.engine.is_multiple()
+            and request.engine.can_auto_convert_to_avif()
+        )
+
+    def can_auto_convert_to_avif(self):
+        return self.context.config.AUTO_AVIF and self._supports_avif()
+
+    def _supports_heif(self):
+        request = self.context.request
+
+        return (
+            self._accepts_parsed_mime_type("accepts_heif", "image/heif")
+            and not request.engine.is_multiple()
+            and request.engine.can_auto_convert_to_heif()
+        )
+
+    def can_auto_convert_to_heif(self):
+        return self.context.config.AUTO_HEIF and self._supports_heif()
+
+    def _supports_jpg(self):
+        request = self.context.request
+        accepts_jpg = self._accepts_parsed_mime_type(
+            "accepts_jpeg", "*/*", MIMETYPE_JPG, MIMETYPE_JPEG
+        )
+
+        return (
+            accepts_jpg
+            and not request.engine.is_multiple()
+            and not request.engine.has_transparency()
+        )
+
+    def can_auto_convert_to_jpg(self):
+        return self.context.config.AUTO_JPG and self._supports_jpg()
+
+    def _can_auto_convert_to_jpg_in_legacy_mode(self):
+        return (
+            self.can_auto_convert_png_to_jpg()
+            or self.can_auto_convert_to_jpg()
+        )
+
+    def _supports_png(self):
+        request = self.context.request
+
+        return (
+            self._accepts_parsed_mime_type("accepts_png", "image/png")
+            and not request.engine.is_multiple()
+        )
 
     def can_auto_convert_to_png(self):
-        auto_png = self.context.config.AUTO_PNG
-        accepts_png = self.accepts_mime_type("image/png")
+        return self.context.config.AUTO_PNG and self._supports_png()
 
-        if (
-            auto_png
-            and accepts_png
-            and not self.context.request.engine.is_multiple()
-        ):
-            return True
+    def _resolve_auto_image_extension(self, context):
+        if has_auto_image_format_preference(context.config):
+            for image_format in get_normalized_auto_image_format_preference(
+                context.config
+            ):
+                method_name = PREFERENCE_AUTO_IMAGE_FORMAT_METHODS[
+                    image_format
+                ]
 
-        return False
+                if getattr(self, method_name)():
+                    image_extension = f".{image_format}"
+                    logger.debug(
+                        "Image format set by AUTO_IMAGE_FORMAT_PREFERENCE as %s.",
+                        image_extension,
+                    )
+
+                    return image_extension
+
+            if self.can_auto_convert_png_to_jpg():
+                image_extension = ".jpg"
+                logger.debug(
+                    "Image format set by AUTO_PNG_TO_JPG as %s.",
+                    image_extension,
+                )
+
+                return image_extension
+
+            image_extension = context.request.engine.extension
+            logger.debug(
+                "No preferred image format matched. Retrieving from engine "
+                "extension: %s.",
+                image_extension,
+            )
+
+            return image_extension
+
+        for image_format in DEFAULT_AUTO_IMAGE_FORMAT_PREFERENCE:
+            method_name = LEGACY_AUTO_IMAGE_FORMAT_METHODS[image_format]
+
+            if getattr(self, method_name)():
+                image_extension = f".{image_format}"
+                logger.debug(
+                    LEGACY_AUTO_IMAGE_FORMAT_LOG_MESSAGES[image_format],
+                    image_extension,
+                )
+
+                return image_extension
+
+        image_extension = context.request.engine.extension
+        logger.debug(
+            "No image format specified. Retrieving from engine extension: %s.",
+            image_extension,
+        )
+
+        return image_extension
 
     def define_image_type(self, context, result):
         if result is not None:
@@ -485,6 +703,7 @@ class BaseHandler(tornado.web.RequestHandler):
                 buffer = result.buffer
             else:
                 buffer = result
+
             image_extension = EXTENSION.get(
                 BaseEngine.get_mimetype(buffer), ".jpg"
             )
@@ -499,42 +718,9 @@ class BaseHandler(tornado.web.RequestHandler):
         if image_extension is not None:
             image_extension = f".{image_extension}"
             logger.debug("Image format specified as %s.", image_extension)
-        elif self.is_webp(context):
-            image_extension = ".webp"
-            logger.debug(
-                "Image format set by AUTO_WEBP as %s.", image_extension
-            )
-        elif self.can_auto_convert_to_avif():
-            image_extension = ".avif"
-            logger.debug(
-                "Image format set by AUTO_AVIF as %s.", image_extension
-            )
-        elif (
-            self.can_auto_convert_png_to_jpg()
-            or self.can_auto_convert_to_jpg()
-        ):
-            image_extension = ".jpg"
-            logger.debug(
-                "Image format set by AUTO_PNG_TO_JPG or AUTO_JPG as %s.",
-                image_extension,
-            )
-        elif self.can_auto_convert_to_heif():
-            image_extension = ".heif"
-            logger.debug(
-                "Image format set by AUTO_HEIF as %s.", image_extension
-            )
-        elif self.can_auto_convert_to_png():
-            image_extension = ".png"
-            logger.debug(
-                "Image format set by AUTO_PNG as %s.", image_extension
-            )
+
         else:
-            image_extension = context.request.engine.extension
-            logger.debug(
-                "No image format specified. Retrieving "
-                "from the image extension: %s.",
-                image_extension,
-            )
+            image_extension = self._resolve_auto_image_extension(context)
 
         content_type = CONTENT_TYPE.get(image_extension, CONTENT_TYPE[".jpg"])
 
@@ -652,6 +838,7 @@ class BaseHandler(tornado.web.RequestHandler):
         should_store = (
             result_storage
             and not context.request.prevent_result_storage
+            and self._can_use_result_storage_with_auto_image_formats()
             and (
                 context.config.RESULT_STORAGE_STORES_UNSAFE
                 or not context.request.unsafe
@@ -675,7 +862,7 @@ class BaseHandler(tornado.web.RequestHandler):
 
             return
 
-        (results, content_type) = result
+        results, content_type = result
         await self._write_results_to_client(results, content_type)
 
         if should_store:
@@ -750,22 +937,18 @@ class BaseHandler(tornado.web.RequestHandler):
             buffer = results
 
         # auto-convert configured?
-        should_vary = (
-            self.context.config.AUTO_WEBP
-            or self.context.config.AUTO_AVIF
-            or self.context.config.AUTO_HEIF
-        )
+        should_vary = bool(get_active_auto_image_formats(self.context.config))
         # we have image (not video)
         should_vary = should_vary and content_type.startswith("image/")
         # output format is not requested via format filter
         should_vary = should_vary and not (
             self.context.request.format
-            and bool(  # format is supported by filter
-                re.search(r"format\([^)]+\)", self.context.request.filters)
-            )  # filter is in request
+            and _has_explicit_format_filter(self.context.request.filters)
         )
-        # our image is not animated gif
-        should_vary = should_vary and not self.is_animated_gif(buffer)
+        # our image is not animated
+        should_vary = should_vary and not (
+            self.is_animated_gif(buffer) or self.is_animated_webp(buffer)
+        )
 
         if should_vary:
             self.set_header("Vary", "Accept")
@@ -829,6 +1012,11 @@ class BaseHandler(tornado.web.RequestHandler):
                 "Trying to downsize image with quality of %d...", quality
             )
             results = engine.read(extension, quality)
+
+            if results == initial_results:
+                # The encoder ignores quality, as read_multiple() and RGB JPEG
+                # with PILLOW_JPEG_QTABLES or PILLOW_JPEG_SUBSAMPLING do
+                return initial_results
 
         prev_result = results
 

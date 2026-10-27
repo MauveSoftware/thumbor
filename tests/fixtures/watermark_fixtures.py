@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -7,8 +6,6 @@
 # Licensed under the MIT license:
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
-
-import preggy
 
 POSITIONS = [
     # length (either width or height), position in percent, expected string
@@ -78,30 +75,36 @@ RATIOS = [
     (200, 300),
     (25, 50),
     (50, 25),
+    # Float ratios
+    (33.33, None),
+    (None, 50.5),
+    (12.7, 75.25),
+    (50.5, 50.5),
+    (9.5, None),
+    (None, 9.5),
+    (99.9, 99.9),
+    (33.33, 100),
+    (100, 33.33),
 ]
 
 
-@preggy.assertion
-def to_fit_into(topic, boundary, **kwargs):
+def assert_fits_into(topic, boundary, **kwargs):
     assert (
         topic <= boundary
     ), f"Expected topic({topic}) to fit into boundary {boundary} with test: {kwargs}"
 
 
-@preggy.assertion
-def to_be_true_with_additional_info(topic, **kwargs):
+def assert_true_with_info(topic, **kwargs):
     assert topic, f"Expected topic to be true with test: {kwargs}"
 
 
-@preggy.assertion
-def to_be_equal_with_additional_info(topic, expected, **kwargs):
+def assert_equal_with_info(topic, expected, **kwargs):
     assert (
         topic == expected
     ), f"Expected topic({topic}) to be ({expected}) with test: {kwargs}"
 
 
-@preggy.assertion
-def to_almost_equal(topic, expected, differ, **kwargs):
+def assert_almost_equal(topic, expected, differ, **kwargs):
     assert abs(1 - topic / expected) <= (differ / 100.0), (
         f"Expected topic({topic}) to be almost equal expected"
         f"({expected}) differing only in {differ}% with test: {kwargs}"

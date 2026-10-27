@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -11,7 +10,7 @@
 import tempfile
 from os.path import abspath, dirname, join
 
-from preggy import expect
+import pytest
 from tornado.testing import gen_test
 
 from tests.base import TestCase
@@ -86,12 +85,12 @@ class TransformerTestCase(TestCase):
         trans = Transformer(ctx)
 
         await trans.transform()
-        expect(engine.calls["crop"]).to_be_empty()
+        assert not engine.calls["crop"]
 
     @staticmethod
     def validate_resize(test_data):
-        expect(test_data).to_be_resized()
-        expect(test_data).to_be_cropped()
+        assert test_data.has_resized_properly()
+        assert test_data.has_cropped_properly()
 
     @gen_test
     async def test_can_resize_images(self):
@@ -100,6 +99,43 @@ class TransformerTestCase(TestCase):
             trans = Transformer(context)
             await trans.transform()
             self.validate_resize(item)
+
+    @gen_test
+    async def test_auto_crop_keeps_at_least_one_source_pixel(self):
+        for source_width, source_height, target_width, target_height in [
+            (1, 1, 50, 25),
+            (1, 1, 50, 10),
+            (2, 1, 500, 1),
+        ]:
+            data = TestData(
+                source_width=source_width,
+                source_height=source_height,
+                target_width=target_width,
+                target_height=target_height,
+                halign="center",
+                valign="middle",
+                focal_points=[],
+                crop_left=None,
+                crop_top=None,
+                crop_right=None,
+                crop_bottom=None,
+            )
+            context = data.to_context()
+            transformer = Transformer(context)
+
+            await transformer.transform()
+
+            assert data.engine.calls["crop"] == [
+                {
+                    "left": 0,
+                    "top": 0,
+                    "right": source_width,
+                    "bottom": source_height,
+                }
+            ]
+            assert data.engine.calls["resize"] == [
+                {"width": target_width, "height": target_height}
+            ]
 
     @gen_test
     async def test_can_resize_images_with_detectors(self):
@@ -153,10 +189,10 @@ class TransformerTestCase(TestCase):
         )
         trans = Transformer(context)
 
-        with expect.error_to_happen(IOError, message="some-io-error"):
+        with pytest.raises(IOError, match="some-io-error"):
             await trans.transform()
 
-        expect(test_data.engine.calls["resize"]).to_length(0)
+        assert len(test_data.engine.calls["resize"]) == 0
 
     @gen_test
     async def test_can_fit_in(self):
@@ -167,13 +203,13 @@ class TransformerTestCase(TestCase):
 
             await trans.transform()
 
-            expect(engine.calls["crop"]).to_be_empty()
+            assert not engine.calls["crop"]
             if should_resize:
-                expect(engine.calls["resize"]).to_length(1)
-                expect(engine.calls["resize"][0]["width"]).to_equal(width)
-                expect(engine.calls["resize"][0]["height"]).to_equal(height)
+                assert len(engine.calls["resize"]) == 1
+                assert engine.calls["resize"][0]["width"] == width
+                assert engine.calls["resize"][0]["height"] == height
             else:
-                expect(engine.calls["resize"]).to_be_empty()
+                assert not engine.calls["resize"]
 
     @gen_test
     async def test_can_transform_meta_with_orientation(self):
@@ -198,7 +234,7 @@ class TransformerTestCase(TestCase):
 
         trans = Transformer(ctx)
         await trans.transform()
-        expect(engine.calls["reorientate"]).to_equal(1)
+        assert engine.calls["reorientate"] == 1
 
     @gen_test
     async def test_can_transform_with_flip(self):
@@ -221,8 +257,8 @@ class TransformerTestCase(TestCase):
 
         await trans.transform()
 
-        expect(engine.calls["horizontal_flip"]).to_equal(1)
-        expect(engine.calls["vertical_flip"]).to_equal(1)
+        assert engine.calls["horizontal_flip"] == 1
+        assert engine.calls["vertical_flip"] == 1
 
     @gen_test
     async def test_can_resize_with_stretch(self):
@@ -246,10 +282,38 @@ class TransformerTestCase(TestCase):
 
         await trans.transform()
 
-        expect(engine.calls["resize"]).to_equal(
-            [{"width": 800, "height": 200}]
-        )
-        expect(engine.calls["crop"]).to_be_empty()
+        assert engine.calls["resize"] == [{"width": 800, "height": 200}]
+        assert not engine.calls["crop"]
+
+    @gen_test
+    async def test_no_upscale_limits_request_to_source(self):
+        for width, height, expected in [
+            (600, 400, (300, 200)),
+            (150, 100, (150, 100)),
+            ("orig", "orig", ("orig", "orig")),
+            ("orig", 400, ("orig", 200)),
+            (600, "orig", (300, "orig")),
+        ]:
+            data = TestData(
+                source_width=300,
+                source_height=200,
+                target_width=width,
+                target_height=height,
+                halign="center",
+                valign="middle",
+                focal_points=[],
+                crop_left=None,
+                crop_top=None,
+                crop_right=None,
+                crop_bottom=None,
+            )
+            ctx = data.to_context()
+            ctx.request.no_upscale = True
+            trans = Transformer(ctx)
+
+            await trans.transform()
+
+            assert (ctx.request.width, ctx.request.height) == expected
 
     @gen_test
     async def test_can_extract_cover(self):
@@ -277,7 +341,7 @@ class TransformerTestCase(TestCase):
 
         await trans.transform()
 
-        expect(engine.calls["cover"]).to_equal(1)
+        assert engine.calls["cover"] == 1
 
     @gen_test
     async def test_get_target_dimensions(self):
@@ -298,8 +362,8 @@ class TransformerTestCase(TestCase):
         ctx = data.to_context()
         trans = Transformer(ctx)
         dimensions = trans.get_target_dimensions()
-        expect(dimensions).to_equal((600, 400))
+        assert dimensions == (600, 400)
 
         await trans.transform()
 
-        expect(dimensions).to_equal((600, 400))
+        assert dimensions == (600, 400)

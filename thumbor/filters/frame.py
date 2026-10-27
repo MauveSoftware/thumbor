@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -8,13 +7,17 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
+import tornado.web
+
 from thumbor.ext.filters import _nine_patch
 from thumbor.filters import BaseFilter, filter_method
 from thumbor.loaders import LoaderResult
+from thumbor.utils import logger
 
 
 class Filter(BaseFilter):
     regex = r"(?:frame\((?P<url>.*?))"
+    nine_patch_buffer = None
 
     async def on_image_ready(self, buffer):
         self.nine_patch_engine.load(buffer, None)
@@ -74,6 +77,12 @@ class Filter(BaseFilter):
             new_width += right
         if bottom > 0:
             new_height += bottom
+
+        if self.padding_exceeds_limits(new_width, new_height):
+            raise tornado.web.HTTPError(
+                400, reason="Frame padding exceeds configured image limits"
+            )
+
         new_engine = self.context.modules.engine.__class__(self.context)
         new_engine.image = new_engine.gen_image(
             (new_width, new_height), "#fff"
@@ -81,6 +90,24 @@ class Filter(BaseFilter):
         new_engine.enable_alpha()
         new_engine.paste(self.engine, (offset_x, offset_y))
         self.engine.image = new_engine.image
+
+    def padding_exceeds_limits(self, new_width, new_height):
+        # Only the sides the padding grows are checked: a proportional side
+        # or an upscale can already leave thumbor past these limits, and the
+        # frame should not start rejecting those images on its own.
+        width, height = self.engine.size
+        max_width = self.context.config.MAX_WIDTH
+        max_height = self.context.config.MAX_HEIGHT
+        max_pixels = self.context.config.MAX_PIXELS
+
+        if new_width > width and max_width and new_width > max_width:
+            return True
+        if new_height > height and max_height and new_height > max_height:
+            return True
+        grows = (new_width, new_height) != (width, height)
+        return bool(
+            grows and max_pixels and new_width * new_height > max_pixels
+        )
 
     async def on_fetch_done(self, result):
         # TODO if result.successful is False how can the error be handled?
@@ -92,6 +119,7 @@ class Filter(BaseFilter):
         self.nine_patch_engine.load(buffer, None)
         await self.storage.put(self.url, self.nine_patch_engine.read())
         await self.storage.put_crypto(self.url)
+        self.nine_patch_buffer = buffer
         await self.on_image_ready(buffer)
 
     @filter_method(BaseFilter.String)
@@ -102,9 +130,24 @@ class Filter(BaseFilter):
         )
         self.storage = self.context.modules.storage
 
-        buffer = await self.storage.get(self.url)
+        buffer = self.nine_patch_buffer
+        if buffer is None:
+            buffer = await self.storage.get(self.url)
         if buffer is not None:
+            self.nine_patch_buffer = buffer
             return await self.on_image_ready(buffer)
+
+        if not self.validate(self.url):
+            raise tornado.web.HTTPError(400)
 
         result = await self.context.modules.loader.load(self.context, self.url)
         await self.on_fetch_done(result)
+
+    def validate(self, url):
+        if not hasattr(self.context.modules.loader, "validate"):
+            return True
+
+        if not self.context.modules.loader.validate(self.context, url):
+            logger.warning('frame source not allowed: "%s"', url)
+            return False
+        return True

@@ -1,20 +1,44 @@
-PYTHON = python
-.PHONY: docs build perf
+PYTHON ?= python3
+UV_VERSION ?= 0.11.19
+UV_BOOTSTRAP_DIR ?= .uv-venv
+UV = $(shell command -v uv 2>/dev/null || printf '%s' "$(UV_BOOTSTRAP_DIR)/bin/uv")
+UV_RUN = $(UV) run --locked
+UV_RUN_DEV = $(UV_RUN) --extra tests
+UV_RUN_TESTS = $(UV_RUN_DEV) --extra all
+
+.PHONY: \
+	bootstrap-uv build build_docs ci_test compile_ext coverage docs flake \
+	format isort integration integration_run int lcov pint pintegration \
+	pre-commit publish pylint run run-prod sequential-unit setup setup-ci \
+	setup_docs test unit
 
 OS := $(shell uname)
 
 run: compile_ext
-	@thumbor -l debug -d -c thumbor/thumbor.conf
+	@$(UV_RUN) --extra all thumbor -l debug -d -c thumbor/thumbor.conf
 
 run-prod: compile_ext
-	@thumbor -l error -c thumbor/thumbor.conf
+	@$(UV_RUN) --extra all thumbor -l error -c thumbor/thumbor.conf
 
-setup:
-	@$(PYTHON) -m pip install -e .[tests]
-	@echo  "\n\nYou are strongly recommended to run 'pre-commit install'\n"
+bootstrap-uv:
+	@if ! "$(UV)" --version >/dev/null 2>&1; then \
+		echo "Installing uv $(UV_VERSION) into $(UV_BOOTSTRAP_DIR)"; \
+		$(PYTHON) -m pip install --disable-pip-version-check --upgrade \
+			--target "$(UV_BOOTSTRAP_DIR)" "uv==$(UV_VERSION)"; \
+	fi
+
+setup: bootstrap-uv
+	@$(UV) sync --locked --extra tests --extra all
+	@echo  "\n\nYou are strongly recommended to run 'make pre-commit'\n"
+
+setup-ci:
+	@$(UV) sync --locked --extra tests --extra all
 
 compile_ext build:
-	@$(PYTHON) setup.py build_ext -i
+	@$(UV) run --locked --group build python setup.py build_ext -i
+
+pre-commit:
+	@$(UV) run --locked --extra tests pre-commit install
 
 test: build redis
 	@$(MAKE) unit coverage
@@ -24,24 +48,27 @@ test: build redis
 
 ci_test: build
 	@echo "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-	@echo "TORNADO IS `python -c 'import tornado; import inspect; print(inspect.getfile(tornado))'`"
+	@echo "TORNADO IS `$(UV_RUN_TESTS) python -c 'import tornado; import inspect; print(inspect.getfile(tornado))'`"
 	@echo "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-	@if [ "$$LINT_TEST" ]; then $(MAKE) flake; elif [ "$$PERF_TEST" ]; then $(MAKE) long-perf; elif [ -z "$$INTEGRATION_TEST" ]; then $(MAKE) unit coverage; else $(MAKE) integration_run; fi
+	@if [ "$$LINT_TEST" ]; then $(MAKE) flake; elif [ -z "$$INTEGRATION_TEST" ]; then $(MAKE) unit coverage; else $(MAKE) integration_run; fi
 
 integration_run integration int:
-	@pytest -sv integration_tests/ -p no:tldr
+	@$(UV_RUN_TESTS) pytest -sv integration_tests/ -p no:tldr
 
 pint pintegration:
-	@pytest -sv integration_tests/ -p no:tldr -n `nproc`
+	@$(UV_RUN_TESTS) pytest -sv integration_tests/ -p no:tldr -n auto
 
 coverage:
-	@coverage report -m --fail-under=10
+	@$(UV_RUN_TESTS) coverage report -m --fail-under=10
+
+lcov:
+	@$(UV_RUN_TESTS) coverage lcov
 
 unit:
-	@pytest -n `nproc` --cov=thumbor tests/
+	@$(UV_RUN_TESTS) pytest -n auto --cov=thumbor tests/
 
 sequential-unit:
-	@pytest -sv --junit-xml=test-results/unit/results.xml --cov=thumbor tests/
+	@$(UV_RUN_TESTS) pytest -sv --junit-xml=test-results/unit/results.xml --cov=thumbor tests/
 
 kill_redis:
 	@-redis-cli -p 6668 -a hey_you shutdown
@@ -55,36 +82,26 @@ redis: kill_redis
 	@redis-cli -p 6668 -a hey_you info
 
 format:
-	@black .
+	@$(UV_RUN_DEV) isort --profile black thumbor tests integration_tests setup.py
+	@$(UV_RUN_DEV) black .
 
 flake:
-	@flake8 --config .flake8
+	@$(UV_RUN_DEV) flake8 --config .flake8 thumbor tests integration_tests setup.py
 
-pylint:
-	@pylint --load-plugins=pylint.extensions.no_self_use thumbor tests
+isort:
+	@$(UV_RUN_DEV) isort --profile black --check-only --diff thumbor tests integration_tests setup.py
+
+pylint: compile_ext
+	@$(UV_RUN_TESTS) pylint --load-plugins=pylint.extensions.no_self_use thumbor tests
 
 setup_docs:
-	@$(PYTHON) -m pip install -r docs/requirements.txt
+	@$(UV) sync --locked --inexact --group docs
 
 build_docs:
-	@cd docs && make html
+	@$(UV) run --locked --group docs make -C docs html SPHINXOPTS="-W --keep-going"
 
 docs:
-	@sphinx-reload --host 0.0.0.0 --port 5555 docs/
-
-perf-start-daemon: perf-stop-daemon
-	@start-stop-daemon -d `pwd`/perf --make-pidfile --background --start --pidfile /tmp/thumbor-perf.pid --exec `which thumbor` -- -l error -c ./thumbor.conf
-	@sleep 2
-
-# if you change this, also change in run.sh
-perf-stop-daemon:
-	@start-stop-daemon -q --stop --oknodo --remove-pidfile --pidfile /tmp/thumbor-perf.pid > /dev/null 2>&1
-
-perf: perf-start-daemon
-	@cd perf && DURATION=10 bash run.sh
-
-long-perf: perf-start-daemon
-	@cd perf && bash run.sh
+	@$(UV) run --locked --group docs sphinx-reload --host 0.0.0.0 --port 5555 docs/
 
 sample_images:
 	convert -delay 100 -size 100x100 gradient:blue gradient:red -loop 0 integration_tests/imgs/animated.gif
@@ -148,9 +165,6 @@ sample_images:
 	convert tests/fixtures/filters/watermark.svg -transparent white -resize 30x30 tests/fixtures/filters/watermark.png
 	curl -s https://upload.wikimedia.org/wikipedia/commons/thumb/d/da/Guido-portrait-2014.jpg/800px-Guido-portrait-2014.jpg -o tests/fixtures/filters/800px-Guido-portrait-2014.jpg
 	curl -s https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Christophe_Henner_-_June_2016.jpg/800px-Christophe_Henner_-_June_2016.jpg -o tests/fixtures/filters/800px-Christophe_Henner_-_June_2016.jpg
-	curl -s https://upload.wikimedia.org/wikipedia/commons/thumb/7/79/Coffee_berries_1.jpg/800px-Coffee_berries_1.jpg -o tests/fixtures/filters/800px-Coffee_berries_1.jpg
-	curl -s https://upload.wikimedia.org/wikipedia/commons/thumb/4/45/A_small_cup_of_coffee.JPG/800px-A_small_cup_of_coffee.JPG -o tests/fixtures/filters/800px-A_small_cup_of_coffee.JPG
-	curl -s https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Coffee_beans_-_ziarna_kawy.jpg/513px-Coffee_beans_-_ziarna_kawy.jpg -o tests/fixtures/filters/513px-Coffee_beans_-_ziarna_kawy.jpg
 	curl -s https://upload.wikimedia.org/wikipedia/commons/archive/4/47/20161122122708%21PNG_transparency_demonstration_1.png | convert - -resize 300x225 tests/fixtures/filters/PNG_transparency_demonstration_1.png
 	convert tests/fixtures/filters/PNG_transparency_demonstration_1.png -background blue -flatten tests/fixtures/filters/PNG_transparency_demonstration_1_blue.png
 	convert tests/fixtures/filters/PNG_transparency_demonstration_1.png -dither None -colors 256 tests/fixtures/images/paletted-transparent.png
@@ -160,37 +174,17 @@ sample_images:
 	# the watermark filter's logic is too complicated to reproduce with IM, the watermark test images can't be generated here
 	# similarly, the noise, colorize, redeye and fill filters generate output too unique to be reproduce with IM and can't be generated here
 
-test-docker-build: test-docker-39-build test-docker310-build test-docker311-build test-docker312-build
+test-docker-build: test-docker-311-build test-docker-312-build test-docker-313-build test-docker-314-build test-docker-315-build
 
-test-docker-run: test-docker-39-run test-docker-310-run test-docker311-build test-docker312-build
+test-docker-run: test-docker-311-run test-docker-312-run test-docker-313-run test-docker-314-run test-docker-315-run
 
-test-docker-publish: test-docker-39-publish test-docker-310-publish test-docker311-build test-docker312-build
-
-test-docker-39-build:
-	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.9 -t thumbor-test-39 .
-
-test-docker-39-run:
-	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:39 make compile_ext redis sequential-unit integration flake
-
-test-docker-39-publish:
-	@docker image tag thumbor-test-39:latest thumbororg/thumbor-test:39
-	@docker push thumbororg/thumbor-test:39
-
-test-docker-310-build:
-	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.10 -t thumbor-test-310 .
-
-test-docker-310-run:
-	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:310 make compile_ext redis sequential-unit integration flake
-
-test-docker-310-publish:
-	@docker image tag thumbor-test-310:latest thumbororg/thumbor-test:310
-	@docker push thumbororg/thumbor-test:310
+test-docker-publish: test-docker-311-publish test-docker-312-publish test-docker-313-publish test-docker-314-publish test-docker-315-publish
 
 test-docker-311-build:
 	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.11 -t thumbor-test-311 .
 
-test-docker-311-run:
-	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:311 make compile_ext redis sequential-unit integration flake
+test-docker-311-run: test-docker-311-build
+	@docker run --rm -v "$$(pwd):/app" thumbor-test-311 make setup-ci compile_ext redis sequential-unit integration flake
 
 test-docker-311-publish:
 	@docker image tag thumbor-test-311:latest thumbororg/thumbor-test:311
@@ -199,14 +193,44 @@ test-docker-311-publish:
 test-docker-312-build:
 	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.12 -t thumbor-test-312 .
 
-test-docker-312-run:
-	@docker run -v "$$(pwd):/app" thumbororg/thumbor-test:312 make compile_ext redis sequential-unit integration flake
+test-docker-312-run: test-docker-312-build
+	@docker run --rm -v "$$(pwd):/app" thumbor-test-312 make setup-ci compile_ext redis sequential-unit integration flake
 
 test-docker-312-publish:
 	@docker image tag thumbor-test-312:latest thumbororg/thumbor-test:312
 	@docker push thumbororg/thumbor-test:312
 
+test-docker-313-build:
+	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.13 -t thumbor-test-313 .
+
+test-docker-313-run: test-docker-313-build
+	@docker run --rm -v "$$(pwd):/app" thumbor-test-313 make setup-ci compile_ext redis sequential-unit integration flake
+
+test-docker-313-publish:
+	@docker image tag thumbor-test-313:latest thumbororg/thumbor-test:313
+	@docker push thumbororg/thumbor-test:313
+
+test-docker-314-build:
+	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.14 -t thumbor-test-314 .
+
+test-docker-314-run: test-docker-314-build
+	@docker run --rm -v "$$(pwd):/app" thumbor-test-314 make setup-ci compile_ext redis sequential-unit integration flake
+
+test-docker-314-publish:
+	@docker image tag thumbor-test-314:latest thumbororg/thumbor-test:314
+	@docker push thumbororg/thumbor-test:314
+
+test-docker-315-build:
+	@docker build -f TestDockerfile --build-arg PYTHON_VERSION=3.15 -t thumbor-test-315 .
+
+test-docker-315-run: test-docker-315-build
+	@docker run --rm -v "$$(pwd):/app" thumbor-test-315 make setup-ci compile_ext redis sequential-unit integration flake
+
+test-docker-315-publish:
+	@docker image tag thumbor-test-315:latest thumbororg/thumbor-test:315
+	@docker push thumbororg/thumbor-test:315
+
 publish:
-	@python setup.py sdist
-	@twine upload dist/*
+	@$(UV_RUN) --only-group release --only-group build python -m build --sdist --no-isolation
+	@$(UV_RUN) --only-group release python -m twine upload dist/*
 	@rm -rf dist/

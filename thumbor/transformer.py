@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -14,12 +13,11 @@ import sys
 from thumbor.point import FocalPoint
 from thumbor.utils import logger
 
-TRIM_ENABLED = True
 try:
     from thumbor.ext.filters import _bounding_box
 except ImportError:
     logger.warning("Error importing bounding_box filter, trimming won't work")
-    TRIM_ENABLED = False
+    _bounding_box = None
 
 
 class Transformer:
@@ -29,6 +27,8 @@ class Transformer:
         self.focal_points = None
         self.target_height = None
         self.target_width = None
+        self.requested_height = self.context.request.height
+        self.requested_width = self.context.request.width
 
     async def transform(self):
         if self.context.config.RESPECT_ORIENTATION:
@@ -44,7 +44,7 @@ class Transformer:
         )
         if (
             self.context.request.trim is None
-            or not TRIM_ENABLED
+            or _bounding_box is None
             or is_gifsicle
         ):
             return
@@ -73,34 +73,49 @@ class Transformer:
             self.context.request.crop["right"] -= box[0]
             self.context.request.crop["bottom"] -= box[1]
 
-    def _calculate_target_dimensions(self):
+    def _calculate_dimensions(self, width, height):
         source_width, source_height = self.engine.size
         source_width = float(source_width)
         source_height = float(source_height)
 
-        if not self.context.request.width and not self.context.request.height:
-            self.target_width = source_width
-            self.target_height = source_height
+        if not width and not height:
+            target_width = source_width
+            target_height = source_height
         else:
-            if self.context.request.width:
-                if self.context.request.width == "orig":
-                    self.target_width = source_width
+            if width:
+                if width == "orig":
+                    target_width = source_width
                 else:
-                    self.target_width = float(self.context.request.width)
+                    target_width = float(width)
             else:
-                self.target_width = self.engine.get_proportional_width(
-                    self.context.request.height
-                )
+                target_width = self.engine.get_proportional_width(height)
 
-            if self.context.request.height:
-                if self.context.request.height == "orig":
-                    self.target_height = source_height
+            if height:
+                if height == "orig":
+                    target_height = source_height
                 else:
-                    self.target_height = float(self.context.request.height)
+                    target_height = float(height)
             else:
-                self.target_height = self.engine.get_proportional_height(
-                    self.context.request.width
-                )
+                target_height = self.engine.get_proportional_height(width)
+
+        return target_width, target_height
+
+    def _calculate_target_dimensions(self):
+        self.target_width, self.target_height = self._calculate_dimensions(
+            self.context.request.width,
+            self.context.request.height,
+        )
+
+    def _limit_upscale(self, width, height):
+        source_width, source_height = self.engine.size
+
+        if width != "orig":
+            width = min(width, source_width)
+        if height != "orig":
+            height = min(height, source_height)
+
+        self.context.request.width = width
+        self.context.request.height = height
 
     def get_target_dimensions(self):
         """
@@ -227,6 +242,11 @@ class Transformer:
             self.extract_cover()
 
         self.manual_crop()
+        if self.context.request.no_upscale:
+            self._limit_upscale(
+                self.context.request.width,
+                self.context.request.height,
+            )
         self._calculate_target_dimensions()
         self.adjust_focal_points()
 
@@ -300,6 +320,9 @@ class Transformer:
             )
             crop_height = source_height
 
+        crop_width = max(1, crop_width)
+        crop_height = max(1, crop_height)
+
         crop_left = int(
             round(
                 min(
@@ -357,25 +380,39 @@ class Transformer:
 
     def fit_in_resize(self):
         source_width, source_height = self.engine.size
+        orientation_width, orientation_height = self._calculate_dimensions(
+            self.requested_width,
+            self.requested_height,
+        )
 
         # invert width and height if image orientation is not the
         # same as request orientation and need adaptive
         if self.context.request.adaptive and (
             (
                 source_width < source_height
-                and self.target_width > self.target_height
+                and orientation_width > orientation_height
             )
             or (
                 source_width > source_height
-                and self.target_width < self.target_height
+                and orientation_width < orientation_height
             )
         ):
             tmp = self.context.request.width
             self.context.request.width = self.context.request.height
             self.context.request.height = tmp
+            tmp = self.requested_width
+            self.requested_width = self.requested_height
+            self.requested_height = tmp
             tmp = self.target_width
             self.target_width = self.target_height
             self.target_height = tmp
+
+            if self.context.request.no_upscale:
+                # the request was limited along the unswapped axes
+                self._limit_upscale(
+                    self.requested_width, self.requested_height
+                )
+                self._calculate_target_dimensions()
 
         sign = 1
         if self.context.request.full:
@@ -389,10 +426,7 @@ class Transformer:
             return
 
         # add 1e-5 to get .5 rounding up in Python3 as it was in Python2
-        if (
-            source_width / self.target_width * sign
-            >= source_height / self.target_height * sign
-        ):
+        if self._fits_in_by_width(source_width, source_height, sign):
             resize_height = round(
                 source_height * self.target_width / source_width + 1e-5
             )
@@ -402,6 +436,9 @@ class Transformer:
             resize_width = round(
                 source_width * self.target_height / source_height + 1e-5
             )
+
+        resize_width = max(1, resize_width)
+        resize_height = max(1, resize_height)
 
         # ensure that filter should work on the real image size
         # and not on the request size which might be smaller than the
@@ -420,6 +457,18 @@ class Transformer:
         self.context.request.height = int(max(requested_height, resize_height))
 
         self.engine.resize(resize_width, resize_height)
+
+    def _fits_in_by_width(self, source_width, source_height, sign):
+        # A zero target can only be a proportional dimension that rounded
+        # down, so the dimension the request gave has to drive the fit
+        if not self.target_height:
+            return True
+        if not self.target_width:
+            return False
+        return (
+            source_width / self.target_width * sign
+            >= source_height / self.target_height * sign
+        )
 
     def debug(self):
         if not self.context.request.focal_points:

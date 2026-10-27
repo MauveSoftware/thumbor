@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -8,10 +7,10 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
-from preggy import expect
 from tornado.testing import gen_test
 
 from tests.base import FilterTestCase
+from thumbor.ext.filters import _colorize
 
 
 class ColorizeFilterTestCase(FilterTestCase):
@@ -25,4 +24,10 @@ class ColorizeFilterTestCase(FilterTestCase):
         expected = self.get_fixture("colorize.jpg")
 
         ssim = self.get_ssim(image, expected)
-        expect(ssim).to_be_greater_than(0.97)
+        assert ssim > 0.97
+
+
+def test_colorize_truncates_the_weighted_average():
+    result = _colorize.apply("RGB", 50, 50, 50, 0, 0, 0, bytes([201, 3, 255]))
+
+    assert result == bytes([100, 1, 127])

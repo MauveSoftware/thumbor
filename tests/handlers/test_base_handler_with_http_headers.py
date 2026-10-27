@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -13,7 +12,6 @@ from datetime import datetime, timedelta
 from os.path import dirname
 
 import pytz
-from preggy import expect
 from tornado.testing import gen_test
 
 from tests.fixtures.images import default_image
@@ -47,8 +45,8 @@ class ImageOperationsWithoutEtagsTestCase(BaseImagingTestCase):
             "/unsafe/image.jpg", headers={"Accept": "image/webp,*/*;q=0.8"}
         )
 
-        expect(response.code).to_equal(200)
-        expect(response.headers).not_to_include("Etag")
+        assert response.code == 200
+        assert "Etag" not in response.headers
 
 
 class ImageOperationsWithoutCorsHeaderTestCase(BaseImagingTestCase):
@@ -72,8 +70,8 @@ class ImageOperationsWithoutCorsHeaderTestCase(BaseImagingTestCase):
             "/unsafe/image.jpg", headers={"Accept": "image/webp,*/*;q=0.8"}
         )
 
-        expect(response.code).to_equal(200)
-        expect(response.headers).not_to_include("Access-Control-Allow-Origin")
+        assert response.code == 200
+        assert "Access-Control-Allow-Origin" not in response.headers
 
 
 class ImageOperationsWithCorsHeaderTestCase(BaseImagingTestCase):
@@ -99,9 +97,9 @@ class ImageOperationsWithCorsHeaderTestCase(BaseImagingTestCase):
             "/unsafe/image.jpg", headers={"Accept": "image/webp,*/*;q=0.8"}
         )
 
-        expect(response.code).to_equal(200)
-        expect(response.headers).to_include("Access-Control-Allow-Origin")
-        expect(response.headers["Access-Control-Allow-Origin"]).to_equal("*")
+        assert response.code == 200
+        assert "Access-Control-Allow-Origin" in response.headers
+        assert response.headers["Access-Control-Allow-Origin"] == "*"
 
 
 class ImageOperationsWithLastModifiedTestCase(BaseImagingTestCase):
@@ -153,7 +151,7 @@ class ImageOperationsWithLastModifiedTestCase(BaseImagingTestCase):
             },
         )
 
-        expect(response.code).to_equal(304)
+        assert response.code == 304
 
     @gen_test
     async def test_can_get_image_with_last_modified(self):
@@ -168,5 +166,5 @@ class ImageOperationsWithLastModifiedTestCase(BaseImagingTestCase):
             },
         )
 
-        expect(response.code).to_equal(200)
-        expect(response.headers).to_include("Last-Modified")
+        assert response.code == 200
+        assert "Last-Modified" in response.headers

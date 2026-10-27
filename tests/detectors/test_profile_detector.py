@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -11,7 +10,6 @@
 from os.path import abspath
 from unittest import mock
 
-from preggy import expect
 from tornado.testing import gen_test
 
 from tests.base import DetectorTestCase
@@ -28,5 +26,4 @@ class ProfileDetectorTestCase(DetectorTestCase):
             )
         )
 
-        detector = Detector(ctx, 1, [])
-        expect(detector).not_to_be_null()
+        Detector(ctx, 1, [])

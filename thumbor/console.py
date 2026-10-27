@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -61,7 +60,7 @@ def get_server_parameters(arguments=None):
         "-k",
         "--keyfile",
         default=None,
-        help="The path of the configuration file to use for this "
+        help="The path of the security key file to use for this "
         "thumbor instance [default: %(default)s].",
     )
 

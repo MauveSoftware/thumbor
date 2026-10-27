@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -19,6 +18,14 @@ class Filter(BaseFilter):
     async def format(self, file_format):
         if file_format.lower() not in ALLOWED_FORMATS:
             logger.debug("Format not allowed: %s", file_format.lower())
+            self.context.request.format = None
+        elif (
+            file_format.lower() in ("jpeg", "jpg")
+            and self.context.request.engine.is_multiple()
+        ):
+            logger.debug(
+                "Format cannot hold multiple frames: %s", file_format.lower()
+            )
             self.context.request.format = None
         else:
             logger.debug("Format specified: %s", file_format.lower())

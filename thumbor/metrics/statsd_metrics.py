@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -9,6 +8,7 @@
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
 import statsd
+
 from thumbor.metrics import BaseMetrics
 
 

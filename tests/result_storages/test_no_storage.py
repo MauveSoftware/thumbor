@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -8,7 +7,6 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
-from preggy import expect
 from tornado.testing import gen_test
 
 from tests.base import TestCase
@@ -27,10 +25,10 @@ class NoResultStorageTestCase(TestCase):
     async def test_result_has_no_image(self):
         no_storage = NoStorage(self.context)
         result = await no_storage.get()
-        expect(result).to_be_null()
+        assert result is None
 
     @gen_test
     async def test_can_put_image(self):
         no_storage = NoStorage(self.context)
         result = await no_storage.put(100)
-        expect(result).to_equal("")
+        assert result == ""

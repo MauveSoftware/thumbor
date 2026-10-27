@@ -5,6 +5,19 @@
 import pytest
 
 import tests.base  # NOQA
+from thumbor.loaders import http_loader
+
+PROXY_ENVIRONMENT_VARIABLES = (
+    *http_loader._CURL_PROXY_ENVIRONMENT_VARIABLES,  # pylint: disable=protected-access
+    "no_proxy",
+    "NO_PROXY",
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_proxy_environment(monkeypatch):
+    for name in PROXY_ENVIRONMENT_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -71,7 +84,7 @@ Verifying security...
 
     Error Description:
         You should specify a unique security key for thumbor or use a command line param to specify a security key.
-\tFor more information visit https://thumbor.readthedocs.io/en/latest/running.html
+        For more information visit https://thumbor.readthedocs.io/en/latest/running.html
 
 ⛔Errors⛔
 * thumbor.storages.file_storagee
@@ -163,8 +176,8 @@ Verifying security...
         Unsafe URLs are enabled.
 
     Error Description:
-        It is STRONGLY recommended that you turn off ALLOW_UNSAFE_URLS flag in production environments as this can lead to DDoS attacks against thumbor.
-\tFor more information visit https://thumbor.readthedocs.io/en/latest/security.html
+        It is STRONGLY recommended that you turn off ALLOW_UNSAFE_URL flag in production environments as this can lead to DDoS attacks against thumbor.
+        For more information visit https://thumbor.readthedocs.io/en/latest/security.html
 
 ❓Need Help❓
 

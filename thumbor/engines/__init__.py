@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -13,6 +12,7 @@
 
 import re
 from xml.etree.ElementTree import ParseError
+
 import piexif
 
 from thumbor.engines.extensions.exif_orientation_editor import (
@@ -22,16 +22,16 @@ from thumbor.utils import EXTENSION, logger
 
 try:
     import cairosvg
-except ImportError:
+except (ImportError, OSError) as error:
     cairosvg = None
+    CAIROSVG_IMPORT_ERROR = error
+else:
+    CAIROSVG_IMPORT_ERROR = None
 
 
 WEBP_SIDE_LIMIT = 16383
 
-SVG_RE = re.compile(
-    b"<svg\s[^>]*([\"'])http[^\"']*svg[^\"']*",  # pylint: disable=anomalous-backslash-in-string
-    re.I,
-)
+SVG_RE = re.compile(rb"<svg\b[^>]*?>", re.I)
 
 
 class EngineResult:
@@ -134,9 +134,7 @@ class BaseEngine:
             img_mime = "video/mp4"
         elif buffer.startswith(b"\x1aE\xdf\xa3"):
             img_mime = "video/webm"
-        elif buffer.startswith(b"\x49\x49\x2a\x00") or buffer.startswith(
-            b"\x4d\x4d\x00\x2a"
-        ):
+        elif buffer.startswith((b"\x49\x49\x2a\x00", b"\x4d\x4d\x00\x2a")):
             img_mime = "image/tiff"
         elif SVG_RE.search(buffer[:2048].replace(b"\0", b"")):
             img_mime = "image/svg+xml"
@@ -164,10 +162,12 @@ class BaseEngine:
 
     def convert_svg_to_png(self, buffer):
         if not cairosvg:
-            msg = """[BaseEngine] convert_svg_to_png failed cairosvg not
-            imported (if you want svg conversion to png please install cairosvg)
-            """
-            logger.error(msg)
+            logger.error(
+                "[BaseEngine] convert_svg_to_png failed: CairoSVG could not "
+                "be loaded (%s)",
+                CAIROSVG_IMPORT_ERROR
+                or "install cairosvg to enable SVG conversion to PNG",
+            )
             return buffer
 
         try:
@@ -208,9 +208,12 @@ class BaseEngine:
         except Exception as error:  # pylint: disable=broad-except
             logger.error("Error reading image metadata: %s", error)
 
-        if self.context.config.ALLOW_ANIMATED_GIFS and isinstance(
-            image_or_frames, (list, tuple)
-        ):
+        allow_animation = (
+            self.context.config.ALLOW_ANIMATED_WEBP
+            if self.extension == ".webp"
+            else self.context.config.ALLOW_ANIMATED_GIFS
+        )
+        if allow_animation and isinstance(image_or_frames, (list, tuple)):
             self.image = image_or_frames[0]
             if len(image_or_frames) > 1:
                 self.multiple_engine = MultipleEngine(self)

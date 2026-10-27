@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -10,5 +9,5 @@
 
 """This is the main module in thumbor"""
 
-__version__ = "7.7.5"
-__release_date__ = "20-Apr-2025"
+__version__ = "7.8.0"
+__release_date__ = "30-May-2026"

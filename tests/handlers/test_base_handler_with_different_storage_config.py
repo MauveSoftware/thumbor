@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -8,10 +7,12 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
+from io import BytesIO
 from json import loads
 from shutil import which
 
-from preggy import expect
+import pytest
+from PIL import Image
 from tornado.testing import gen_test
 
 from tests.handlers.test_base_handler import BaseImagingTestCase
@@ -54,7 +55,7 @@ class StorageOverrideTestCase(BaseImagingTestCase):
             return old_load(self, arg, arg2)
 
         def put_override(*_):
-            expect.not_to_be_here()
+            pytest.fail("Should not reach here")
 
         Engine.load = load_override
         FileStorage.put = put_override
@@ -64,7 +65,7 @@ class StorageOverrideTestCase(BaseImagingTestCase):
         Engine.load = old_load
         FileStorage.put = old_put
 
-        expect(response.code).to_equal(200)
+        assert response.code == 200
 
 
 class ImageOperationsWithoutStorage(BaseImagingTestCase):
@@ -90,31 +91,42 @@ class ImageOperationsWithoutStorage(BaseImagingTestCase):
     @gen_test
     async def test_meta(self):
         response = await self.async_fetch("/unsafe/meta/800x400/image.jpg")
-        expect(response.code).to_equal(200)
+        assert response.code == 200
 
     @gen_test
     async def test_meta_with_unicode(self):
         response = await self.async_fetch(
             "/unsafe/meta/200x300/alabama1_ap620%C3%A9.jpg"
         )
-        expect(response.code).to_equal(200)
+        assert response.code == 200
         obj = loads(response.body.decode("utf-8"))
-        expect(obj["thumbor"]["target"]["width"]).to_equal(200)
-        expect(obj["thumbor"]["target"]["height"]).to_equal(300)
+        assert obj["thumbor"]["target"]["width"] == 200
+        assert obj["thumbor"]["target"]["height"] == 300
 
     @gen_test
     async def test_meta_frame_count(self):
         response = await self.async_fetch("/unsafe/meta/800x400/image.jpg")
-        expect(response.code).to_equal(200)
+        assert response.code == 200
         obj = loads(response.body.decode("utf-8"))
-        expect(obj["thumbor"]["source"]["frameCount"]).to_equal(1)
+        assert obj["thumbor"]["source"]["frameCount"] == 1
 
     @gen_test
     async def test_meta_frame_count_with_gif(self):
         response = await self.async_fetch("/unsafe/meta/animated.gif")
-        expect(response.code).to_equal(200)
+        assert response.code == 200
         obj = loads(response.body.decode("utf-8"))
-        expect(obj["thumbor"]["source"]["frameCount"]).to_equal(2)
+        assert obj["thumbor"]["source"]["frameCount"] == 2
+
+    @gen_test
+    async def test_no_upscale_limits_gif_to_cropped_area(self):
+        response = await self.async_fetch(
+            "/unsafe/0x0:20x20/300x300/filters:no_upscale()/animated.gif"
+        )
+        assert response.code == 200
+        assert response.headers["Content-Type"] == "image/gif"
+        image = Image.open(BytesIO(response.body))
+        assert image.size == (20, 20)
+        assert image.n_frames == 2
 
     @gen_test
     async def test_max_bytes(self):
@@ -122,8 +134,8 @@ class ImageOperationsWithoutStorage(BaseImagingTestCase):
             "/unsafe/filters:max_bytes(35000)/Giunchedi%2C_"
             "Filippo_January_2015_01.jpg"
         )
-        expect(response.code).to_equal(200)
-        expect(len(response.body)).to_be_lesser_or_equal_to(35000)
+        assert response.code == 200
+        assert len(response.body) <= 35000
 
     @gen_test
     async def test_max_bytes_impossible(self):
@@ -131,8 +143,8 @@ class ImageOperationsWithoutStorage(BaseImagingTestCase):
             "/unsafe/filters:max_bytes(1000)/Giunchedi%2C_Filippo_"
             "January_2015_01.jpg"
         )
-        expect(response.code).to_equal(200)
-        expect(len(response.body)).to_be_greater_than(1000)
+        assert response.code == 200
+        assert len(response.body) > 1000
 
     @gen_test
     async def test_meta_with_exif_orientation(self):
@@ -140,7 +152,7 @@ class ImageOperationsWithoutStorage(BaseImagingTestCase):
             "/unsafe/meta/0x0/Giunchedi%2C_Filippo_January_2015_01-"
             "cmyk-orientation-exif.jpg"
         )
-        expect(response.code).to_equal(200)
+        assert response.code == 200
         obj = loads(response.body.decode("utf-8"))
-        expect(obj["thumbor"]["target"]["width"]).to_equal(533)
-        expect(obj["thumbor"]["target"]["height"]).to_equal(800)
+        assert obj["thumbor"]["target"]["width"] == 533
+        assert obj["thumbor"]["target"]["height"] == 800

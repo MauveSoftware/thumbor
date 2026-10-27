@@ -246,11 +246,12 @@ def check_compiled_extensions():
 
 
 def format_error(dependency, err, msg):
-    formatted_msg = "\n\t".join(msg.split("\n"))
+    formatted_err = err.replace("\n", "\n        ")
+    formatted_msg = msg.replace("\n", "\n        ")
     result = f"""
 * {dependency}
     Error Message:
-        {err}
+        {formatted_err}
 
     Error Description:
         {formatted_msg}
@@ -282,8 +283,8 @@ def check_modules():
         try:
             import_module(module)  # NOQA
             print_success(f"{CHECK} {module} is installed correctly.")
-        except ImportError as error:
-            print_error(f"{CROSS} {module} is not installed.")
+        except (ImportError, OSError) as error:
+            print_error(f"{CROSS} {module} could not be loaded.")
             print(error_message)
             newline()
             errors.append(format_error(module, str(error), error_message))
@@ -390,7 +391,7 @@ def check_security(cfg):
                 "Security",
                 "Unsafe URLs are enabled.",
                 "It is STRONGLY recommended that you turn off "
-                "ALLOW_UNSAFE_URLS flag in production environments "
+                "ALLOW_UNSAFE_URL flag in production environments "
                 "as this can lead to DDoS attacks against thumbor.\n"
                 "For more information visit "
                 "https://thumbor.readthedocs.io/en/latest/security.html",

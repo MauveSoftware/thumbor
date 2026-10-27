@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -9,6 +8,7 @@
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
 from io import BytesIO
+from itertools import chain, repeat
 
 import piexif
 from JpegIPTC import JpegIPTC
@@ -64,20 +64,26 @@ KEEP_EXIF_COPYRIGHT_TAGS = [
 ImageFile.MAXBLOCK = 2**25
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-DECOMPRESSION_BOMB_EXCEPTIONS = (Image.DecompressionBombWarning,)
-
-if hasattr(Image, "DecompressionBombError"):
-    DECOMPRESSION_BOMB_EXCEPTIONS += (Image.DecompressionBombError,)
+DECOMPRESSION_BOMB_EXCEPTIONS = (Image.DecompressionBombWarning,) + (
+    (Image.DecompressionBombError,)
+    if hasattr(Image, "DecompressionBombError")
+    else ()
+)
 
 
 class Engine(BaseEngine):
     def __init__(self, context):
+        # BaseEngine.__init__ assigns self.image, whose setter reads these.
+        self._image = None
+        self._webp_durations = None
         super().__init__(context)
         self.subsampling = None
         self.qtables = None
         self.original_mode = None
         self.exif = None
         self.iptc = None
+        self._webp_loop = 0
+        self.frame_durations = []
 
         try:
             if self.context.config.MAX_PIXELS is None or int(
@@ -100,6 +106,44 @@ class Engine(BaseEngine):
 
         return img
 
+    # Trim, detectors and the engines that filters load for overlays work
+    # on this engine's image rather than on the frame engines, so an
+    # animated WebP exposes its transformed first frame instead of the
+    # decoded one the wrapped operations leave behind.
+    @property
+    def image(self):
+        if self._is_animated_webp():
+            return self.frame_engines()[0].image
+        return self._image
+
+    @image.setter
+    def image(self, image):
+        if self._is_animated_webp():
+            self.frame_engines()[0].image = image
+        else:
+            self._image = image
+
+    def _is_animated_webp(self):
+        return self._webp_durations is not None and self.is_multiple()
+
+    def wrap(self, multiple_engine):
+        read = self.read
+        super().wrap(multiple_engine)
+        if self._webp_durations is not None:
+            # Use the regular encoder for WebP quality and metadata options.
+            # Keep the existing read_multiple contract for other engines/GIFs.
+            self.read = read
+            self.rotate = multiple_engine.do_many("rotate")
+            for frame_engine in multiple_engine.frame_engines:
+                frame_engine.icc_profile = self.icc_profile
+                frame_engine.exif = self.exif
+
+    def reorientate(self, override_exif=True):
+        super().reorientate(override_exif)
+        if self._webp_durations is not None:
+            for frame_engine in self.frame_engines():
+                frame_engine.exif = self.exif
+
     def create_image(self, buffer):
         try:
             img = Image.open(BytesIO(buffer))
@@ -110,6 +154,13 @@ class Engine(BaseEngine):
         self.icc_profile = img.info.get("icc_profile")
         self.exif = img.info.get("exif")
         self.original_mode = img.mode
+
+        if img.mode == "1" and "transparency" in img.info:
+            # Pillow before 12.1 keeps the tRNS sample of a 1-bit PNG as
+            # read (0 or 1) while the pixels are 0 or 255, so convert()
+            # never matched a white colorkey; 12.1 reads it as 0 or 255
+            # (python-pillow/Pillow#9282)
+            img.info["transparency"] = 255 if img.info["transparency"] else 0
 
         if self.context.config.PRESERVE_IPTC_INFO:
             jpegiptc_object = JpegIPTC()
@@ -123,6 +174,15 @@ class Engine(BaseEngine):
 
         self.qtables = getattr(img, "quantization", None)
 
+        if self._can_animate_webp(img):
+            # copy() loads each WebP frame before copying its duration, which
+            # Pillow populates lazily. Keep full color and alpha, not a palette.
+            frames = [frame.copy() for frame in ImageSequence.Iterator(img)]
+            self._webp_durations = [frame.info["duration"] for frame in frames]
+            self._webp_loop = img.info.get("loop", 0)
+            self.frame_count = len(frames)
+            return frames
+
         if (
             self.context.config.ALLOW_ANIMATED_GIFS
             and self.extension == ".gif"
@@ -133,10 +193,34 @@ class Engine(BaseEngine):
                 frames.append(frame.convert("P"))
             img.seek(0)
             self.frame_count = len(frames)
+            self.frame_durations = [
+                frame.info.get("duration", 80) for frame in frames
+            ]
 
             return frames
 
         return img
+
+    def _can_animate_webp(self, img):
+        if not (
+            self.extension == ".webp"
+            and self.context.config.ALLOW_ANIMATED_WEBP
+            and getattr(img, "is_animated", False)
+        ):
+            return False
+
+        # Every frame decodes to a full RGBA canvas, while Pillow only holds
+        # a single canvas to the MAX_PIXELS limit.
+        pixels = img.n_frames * img.width * img.height
+        if Image.MAX_IMAGE_PIXELS and pixels > Image.MAX_IMAGE_PIXELS:
+            logger.warning(
+                "[PILEngine] animated WebP frames hold %d pixels, over the "
+                "MAX_PIXELS limit; using its first frame",
+                pixels,
+            )
+            return False
+
+        return True
 
     def get_exif_copyright(self):
         try:
@@ -197,11 +281,23 @@ class Engine(BaseEngine):
             )
 
             if self.image.mode == "1":
-                target_mode = "RGB"
+                target_mode = (
+                    "RGBA" if "transparency" in self.image.info else "RGB"
+                )
             else:
                 # convert() figures out RGB or RGBA based on palette used
                 target_mode = None
             self.image = self.image.convert(mode=target_mode)
+        elif (
+            self.image.mode in ["L", "RGB"]
+            and "transparency" in self.image.info
+        ):
+            # Resampling blends a tRNS colorkey into its neighbours, so
+            # promote it to an alpha channel that gets resampled with the
+            # pixels
+            self.image = self.image.convert(
+                "LA" if self.image.mode == "L" else "RGBA"
+            )
 
         size = (int(width), int(height))
         # Tell image loader what target size we want (only JPG for a moment)
@@ -241,11 +337,29 @@ class Engine(BaseEngine):
 
         return ".jpeg"
 
+    def _preserve_gif_transparency(self, unquantized):
+        if unquantized.mode != "RGBA":
+            return
+
+        transparent = unquantized.getchannel("A").point(
+            lambda alpha: 255 if alpha == 0 else 0
+        )
+        histogram = self.image.histogram(transparent)
+        most_common = max(histogram)
+
+        if most_common:
+            self.image.info["transparency"] = histogram.index(most_common)
+
     # TODO: Refactor this
     def read(  # noqa
         self, extension=None, quality=None
     ):  # noqa pylint: disable=too-many-statements,too-many-branches
         # returns image buffer in byte format.
+
+        if self._webp_durations is not None:
+            first_frame = self.frame_engines()[0]
+            self.icc_profile = first_frame.icc_profile
+            self.exif = first_frame.exif
 
         img_buffer = BytesIO()
         requested_extension = extension or self.extension
@@ -259,9 +373,22 @@ class Engine(BaseEngine):
             and self.original_mode in ["P", "1"]
             and self.original_mode != self.image.mode
         ):
-            if self.original_mode == "1":
+            # A 1-bit source that picked up alpha, from a tRNS colorkey
+            # promoted in resize() or from a filter, cannot go back to
+            # "1", so it is quantized like a palette source
+            if (
+                self.original_mode == "1"
+                and not self.image.has_transparency_data
+            ):
                 self.image = self.image.convert("1")
             else:
+                # quantize() only takes L, P, RGB and RGBA, and rejects
+                # every other mode with "image has wrong mode". Filters are
+                # pluggable and can leave any of them behind: grayscale(),
+                # for one, leaves images carrying alpha in LA mode.
+                if self.image.mode not in ("L", "P", "RGB", "RGBA"):
+                    self.image = self.image.convert("RGBA")
+
                 # libimagequant might not be enabled on compile time
                 # but it's better than default octree for RGBA images
                 quantize_method = (
@@ -269,7 +396,11 @@ class Engine(BaseEngine):
                     if pillow_features.check("libimagequant")
                     else None
                 )
+                unquantized = self.image
                 self.image = self.image.quantize(method=quantize_method)
+
+                if requested_extension == ".gif":
+                    self._preserve_gif_transparency(unquantized)
 
         ext = requested_extension or self.get_default_extension()
 
@@ -404,17 +535,28 @@ class Engine(BaseEngine):
 
         try:
             if ext == ".webp":
+                if self._webp_durations is not None:
+                    options.update(
+                        save_all=True,
+                        append_images=[
+                            engine.image for engine in self.frame_engines()[1:]
+                        ],
+                        duration=self._webp_durations,
+                        loop=self._webp_loop,
+                    )
                 if options["quality"] == 100:
                     logger.debug("webp quality is 100, using lossless instead")
                     options["lossless"] = True
                     options.pop("quality")
 
                 if self.image.mode not in ["RGB", "RGBA"]:
-                    if self.image.mode == "P":
-                        mode = "RGBA"
-                    else:
-                        mode = "RGBA" if self.image.mode[-1] == "A" else "RGB"
-                    self.image = self.image.convert(mode)
+                    keep_alpha = (
+                        self.image.mode == "P"
+                        or self.image.has_transparency_data
+                    )
+                    self.image = self.image.convert(
+                        "RGBA" if keep_alpha else "RGB"
+                    )
 
             if (
                 ext in [".png", ".gif", ".heic", ".heif"]
@@ -423,11 +565,25 @@ class Engine(BaseEngine):
                 # 26.10.22: remove ".heic, .heif" in a month(when pillow_heif get updated)
                 self.image = self.image.convert("RGBA")
 
-            self.image.format = FORMATS.get(
+            if ext == ".gif" and self.image.mode == "LA":
+                # Pillow's GIF writer flattens LA to L, but picks the
+                # transparent palette entry out of RGBA
+                self.image = self.image.convert("RGBA")
+
+            image_format = FORMATS.get(
                 ext, FORMATS[self.get_default_extension()]
             )
+            if image_format == "PNG" and self.image.mode == "I":
+                # Pillow 12 and older clipped I to 16 bits on PNG save;
+                # Pillow 13 refuses to write it
+                self.image = self.image.convert("I;16")
+
+            self.image.format = image_format
             self.image.save(img_buffer, self.image.format, **options)
         except IOError:
+            if options.get("save_all"):
+                # A static fallback would silently discard the animation.
+                raise
             logger.exception(
                 "Could not save as improved image, consider to increase ImageFile.MAXBLOCK"
             )
@@ -451,13 +607,25 @@ class Engine(BaseEngine):
         self.image.format = FORMATS.get(
             extension or self.extension, FORMATS[self.get_default_extension()]
         )
+        if self.image.format == "GIF":
+            # Same LA flattening by Pillow's GIF writer as in read()
+            images = [
+                image.convert("RGBA") if image.mode == "LA" else image
+                for image in images
+            ]
+        # fill(), background_color() and frame() replace each frame with a
+        # new canvas, which has no duration of its own
+        loaded_durations = chain(self.frame_durations, repeat(80))
         with BytesIO() as img_buffer:
             images[0].save(
                 img_buffer,
                 self.image.format,
                 save_all=True,
                 append_images=images[1:],
-                duration=[im.info.get("duration", 80) / 1000 for im in images],
+                duration=[
+                    image.info.get("duration", loaded)
+                    for image, loaded in zip(images, loaded_durations)
+                ],
                 loop=int(self.image.info.get("loop", 1)),
             )
             return img_buffer.getvalue()
@@ -476,14 +644,11 @@ class Engine(BaseEngine):
     def image_data_as_rgb(self, update_image=True):
         converted_image = self.image
 
-        if converted_image.mode not in ["RGB", "RGBA"]:
-            if "A" in converted_image.mode:
+        if converted_image.has_transparency_data:
+            if converted_image.mode != "RGBA":
                 converted_image = converted_image.convert("RGBA")
-            elif converted_image.mode == "P":
-                # convert() figures out RGB or RGBA based on palette used
-                converted_image = converted_image.convert(None)
-            else:
-                converted_image = converted_image.convert("RGB")
+        elif converted_image.mode != "RGB":
+            converted_image = converted_image.convert("RGB")
 
         if update_image:
             self.image = converted_image
@@ -491,7 +656,7 @@ class Engine(BaseEngine):
         return converted_image.mode, converted_image.tobytes()
 
     def convert_to_grayscale(self, update_image=True, alpha=True):
-        if "A" in self.image.mode and alpha:
+        if alpha and self.image.has_transparency_data:
             image = self.image.convert("LA")
         else:
             image = self.image.convert("L")

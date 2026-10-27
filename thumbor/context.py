@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -8,11 +7,100 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
-from os.path import abspath, exists
+from pathlib import Path
 
 from thumbor.filters import FiltersFactory
 from thumbor.metrics.logger_metrics import Metrics
 from thumbor.threadpool import ThreadPool
+
+
+def _split_http_header(value, delimiter):
+    parts = []
+    current_part = []
+    quoted = False
+    escaped = False
+
+    for character in value:
+        if escaped:
+            current_part.append(character)
+            escaped = False
+            continue
+
+        if quoted and character == "\\":
+            current_part.append(character)
+            escaped = True
+            continue
+
+        if character == '"':
+            quoted = not quoted
+        elif character == delimiter and not quoted:
+            parts.append("".join(current_part))
+            current_part = []
+            continue
+
+        current_part.append(character)
+
+    parts.append("".join(current_part))
+    return parts
+
+
+def _parse_accept_quality(value):
+    try:
+        quality = float(value.strip())
+    except ValueError:
+        return 0.0
+
+    return quality if 0 <= quality <= 1 else 0.0
+
+
+def _parse_accept_media_range(media_range):
+    parts = [part.strip() for part in _split_http_header(media_range, ";")]
+    media_type = parts[0].lower()
+
+    if not media_type:
+        return None
+
+    for parameter in parts[1:]:
+        name, separator, value = parameter.partition("=")
+        if not separator:
+            continue
+
+        if name.strip().lower() == "q":
+            return media_type, _parse_accept_quality(value)
+
+        # Parameters before q apply to the media type itself. Since thumbor
+        # cannot match those variants, the media range is not applicable.
+        return None
+
+    return media_type, 1.0
+
+
+def _parse_accept_header(accept_header):
+    accepted_media_types = {}
+
+    for media_range in _split_http_header(accept_header or "", ","):
+        parsed_media_range = _parse_accept_media_range(media_range)
+        if parsed_media_range is None:
+            continue
+
+        media_type, quality = parsed_media_range
+        accepted_media_types[media_type] = max(
+            quality,
+            accepted_media_types.get(media_type, 0.0),
+        )
+
+    return accepted_media_types
+
+
+def _accepts_media_type(accepted_media_types, *media_types, allow_any=False):
+    for media_type in media_types:
+        if media_type in accepted_media_types:
+            return accepted_media_types[media_type] > 0
+
+    if "image/*" in accepted_media_types:
+        return accepted_media_types["image/*"] > 0
+
+    return allow_any and accepted_media_types.get("*/*", 0) > 0
 
 
 # Same logic as Importer. This class is very useful and will remain like so for now
@@ -28,9 +116,7 @@ class Context:  # pylint: disable=too-many-instance-attributes
     This class should not be cached in the server.
     """
 
-    def __init__(
-        self, server=None, config=None, importer=None, request_handler=None
-    ):
+    def __init__(self, server=None, config=None, importer=None, request_handler=None):
         self.server = server
         self.config = config
 
@@ -120,9 +206,36 @@ class ServerParameters:  # pylint: disable=too-many-instance-attributes
         if not self.keyfile:
             return
 
-        path = abspath(self.keyfile)
+        configured_path = Path(self.keyfile)
+        path = configured_path
 
-        if not exists(path):
+        try:
+            if configured_path.is_absolute():
+                allowed_directory = configured_path.parent.resolve(strict=True)
+                path = allowed_directory / configured_path.name
+            else:
+                allowed_directory = Path.cwd().resolve(strict=True)
+                path = allowed_directory / configured_path
+
+            path = path.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ValueError(
+                (
+                    f"Could not find security key file at {path.absolute()}. "
+                    "Please verify the keypath argument."
+                )
+            ) from error
+
+        if not path.is_relative_to(allowed_directory):
+            raise ValueError(
+                (
+                    f"Security key file path {configured_path} resolves "
+                    "outside its allowed directory. Please verify the "
+                    "keypath argument."
+                )
+            )
+
+        if not path.is_file():
             raise ValueError(
                 (
                     f"Could not find security key file at {path}. "
@@ -130,7 +243,7 @@ class ServerParameters:  # pylint: disable=too-many-instance-attributes
                 )
             )
 
-        with open(path, "rb") as security_key_file:
+        with path.open("rb") as security_key_file:
             security_key = security_key_file.read().strip()
 
         self.security_key = security_key
@@ -171,9 +284,13 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         request=None,
         max_age=None,
         max_age_shared=None,
-        auto_png_to_jpg=None,
         bypass_cache=False,
         cache_status="miss",
+        auto_png_to_jpg=None,
+        accepts_avif=False,
+        accepts_heif=False,
+        accepts_png=False,
+        accepts_jpeg=False,
     ):
         self.debug = bool(debug)
         self.meta = bool(meta)
@@ -181,12 +298,8 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
 
         if trim is not None:
             trim_parts = trim.split(":")
-            self.trim_pos = (
-                trim_parts[1] if len(trim_parts) > 1 else "top-left"
-            )
-            self.trim_tolerance = (
-                int(trim_parts[2]) if len(trim_parts) > 2 else 0
-            )
+            self.trim_pos = trim_parts[1] if len(trim_parts) > 1 else "top-left"
+            self.trim_tolerance = int(trim_parts[2]) if len(trim_parts) > 2 else 0
 
         if crop is not None:
             self.crop = {k: self.int_or_0(v) for k, v in crop.items()}
@@ -236,22 +349,63 @@ class RequestParameters:  # pylint: disable=too-few-public-methods,too-many-inst
         self.prevent_result_storage = False
         self.unsafe = unsafe == "unsafe" or unsafe is True
         self.format = None
-        self.accepts_webp = accepts_webp
+        self._set_accepted_image_formats(
+            (
+                accepts_webp,
+                accepts_avif,
+                accepts_heif,
+                accepts_png,
+                accepts_jpeg,
+            )
+        )
         self.max_bytes = None
+        self.no_upscale = False
         self.max_age = max_age
         self.max_age_shared = max_age_shared
         self.auto_png_to_jpg = auto_png_to_jpg
         self.bypass_cache = bypass_cache
         self.cache_status = cache_status
         self.headers = None
+        self._accepted_media_types = {}
 
         if request:
-            self.url = request.path
-            self.accepts_webp = "image/webp" in request.headers.get(
-                "Accept", ""
+            self._set_request_headers(request)
+
+    def _set_request_headers(self, request):
+        accept_header = ""
+        self.url = request.path
+        if request.headers:
+            self.headers = request.headers
+            accept_header = request.headers.get("Accept", "")
+
+        self._set_accepted_image_formats_from_header(accept_header)
+
+    def _set_accepted_image_formats_from_header(self, accept_header):
+        accepted_media_types = _parse_accept_header(accept_header)
+        self._accepted_media_types = accepted_media_types
+        self._set_accepted_image_formats(
+            (
+                _accepts_media_type(accepted_media_types, "image/webp"),
+                _accepts_media_type(accepted_media_types, "image/avif"),
+                _accepts_media_type(accepted_media_types, "image/heif"),
+                _accepts_media_type(accepted_media_types, "image/png"),
+                _accepts_media_type(
+                    accepted_media_types,
+                    "image/jpeg",
+                    "image/jpg",
+                    allow_any=True,
+                ),
             )
-            if request.headers:
-                self.headers = request.headers
+        )
+
+    def _set_accepted_image_formats(self, accepted_formats):
+        (
+            self.accepts_webp,
+            self.accepts_avif,
+            self.accepts_heif,
+            self.accepts_png,
+            self.accepts_jpeg,
+        ) = accepted_formats
 
     @staticmethod
     def int_or_0(value):
@@ -299,8 +453,8 @@ class ContextImporter:  # pylint: disable=too-few-public-methods,too-many-instan
         self.compatibility_legacy_storage = None
 
         if importer.compatibility_legacy_storage is not None:
-            self.compatibility_legacy_storage = (
-                importer.compatibility_legacy_storage(context)
+            self.compatibility_legacy_storage = importer.compatibility_legacy_storage(
+                context
             )
 
         self.compatibility_legacy_result_storage = None

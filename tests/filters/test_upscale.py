@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
 
 # thumbor imaging service
@@ -8,8 +7,6 @@
 # http://www.opensource.org/licenses/mit-license
 # Copyright (c) 2011 globo.com thumbor@googlegroups.com
 
-
-from preggy import expect
 from tornado.testing import gen_test
 
 from tests.base import FilterTestCase
@@ -33,7 +30,7 @@ class UpscaleFilterTestCase(FilterTestCase):
         expected = self.get_fixture("upscale1.jpg")
 
         ssim = self.get_ssim(image, expected)
-        expect(ssim).to_be_greater_than(0.97)
+        assert ssim > 0.97
 
     @gen_test
     async def test_upscale_filter_with_fit_in_small(self):
@@ -52,7 +49,7 @@ class UpscaleFilterTestCase(FilterTestCase):
         expected = self.get_fixture("upscale2.jpg")
 
         ssim = self.get_ssim(image, expected)
-        expect(ssim).to_be_greater_than(0.97)
+        assert ssim > 0.97
 
     @gen_test
     async def test_upscale_filter_with_full_fit_in(self):
@@ -72,7 +69,7 @@ class UpscaleFilterTestCase(FilterTestCase):
         expected = self.get_fixture("upscale3.jpg")
 
         ssim = self.get_ssim(image, expected)
-        expect(ssim).to_be_greater_than(0.97)
+        assert ssim > 0.97
 
     @gen_test
     async def test_upscale_filter_with_adaptive_fit_in_big(self):
@@ -92,7 +89,7 @@ class UpscaleFilterTestCase(FilterTestCase):
         expected = self.get_fixture("upscale4.jpg")
 
         ssim = self.get_ssim(image, expected)
-        expect(ssim).to_be_greater_than(0.97)
+        assert ssim > 0.97
 
     @gen_test
     async def test_upscale_filter_with_adaptive_full_fit_in_big(self):
@@ -113,4 +110,4 @@ class UpscaleFilterTestCase(FilterTestCase):
         expected = self.get_fixture("upscale3.jpg")
 
         ssim = self.get_ssim(image, expected)
-        expect(ssim).to_be_greater_than(0.97)
+        assert ssim > 0.97
